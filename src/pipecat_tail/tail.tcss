@@ -1,0 +1,56 @@
+LeftPanel {
+    border: $primary;
+    width: 20%;
+}
+
+MiddlePanel {
+    width: 60%;
+}
+
+RightPanel {
+    border: $primary;
+    padding: 1;
+    width: 20%;
+}
+
+Conversation {
+    border: $primary;
+    height: 60%;
+}
+
+SystemLogs {
+    border: $primary;
+    height: 40%;
+}
+
+SystemInfo {
+    border: $primary;
+}
+
+LLMServiceInfo {
+    border: $primary;
+}
+
+TTSServiceInfo {
+    border: $primary;
+}
+
+ServiceMetrics {
+    height: 30%;
+}
+
+AudioLevel {
+    height: 5%;
+}
+
+ConnectedStatus {
+    color: $text-success;
+}
+
+DisconnectedStatus {
+    color: $text-primary;
+}
+
+ErrorStatus {
+    color: $text-error;
+}
