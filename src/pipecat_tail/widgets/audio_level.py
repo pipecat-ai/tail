@@ -41,7 +41,7 @@ class AudioLevel(Static):
             "#3366bb",
             "#663399",
         )
-        self._bar = ProgressBar(total=100, gradient=gradient, show_percentage=False, show_eta=False)
+        self._bar = ProgressBar(total=1.0, gradient=gradient, show_percentage=False, show_eta=False)
 
     def compose(self) -> ComposeResult:
         """Compose the label and progress bar layout."""
