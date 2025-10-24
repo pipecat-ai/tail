@@ -23,6 +23,7 @@ dependencies = [
     "pipecat-ai>=0.0.87",
     "textual>=6.0.0,<7",
     "textual-plotext>=1.0.0,<2",
+    "typer>=0.20.0,<1",
     "websockets>=13.1,<15.0",
 ]
 
@@ -30,9 +31,8 @@ dependencies = [
 Source = "https://github.com/pipecat-ai/tail"
 Website = "https://pipecat.ai"
 
-[project.scripts]
-pctail = "pipecat_tail.cli:main"
-pipecat-tail = "pipecat_tail.cli:main"
+[project.entry-points."pipecat_cli.extensions"]
+tail = "pipecat_tail.cli:entrypoint_cli_typer"
 
 [dependency-groups]
 dev = [
