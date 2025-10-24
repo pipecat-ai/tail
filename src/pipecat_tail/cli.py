@@ -11,13 +11,15 @@
 This is the standalone application for Tail. It connects to a Tail observer,
 whether local or remote, to receive the current conversation, service metrics,
 audio levels or system logs.
+
+This is registered as a `tail` command for the `pipecat-cli`.
 """
 
-import argparse
 import asyncio
 import json
 import sys
 
+import typer
 import websockets
 from loguru import logger
 
@@ -99,25 +101,42 @@ class PipecatTail:
         await self._app.clear()
 
 
-async def run(url: str):
-    """Asynchronous entrypoint for running the standalon app."""
+def version_callback(value: bool):
+    """Print version and exit."""
+    if value:
+        from pipecat_tail.__version__ import version
+
+        typer.echo(f"ᓚᘏᗢ Pipecat Tail Version: {typer.style(version, fg=typer.colors.GREEN)}")
+        raise typer.Exit()
+
+
+def url_callback(url: str):
+    """Run Pipecat Tail standalone application."""
     app = PipecatTail(url=url)
-    await app.run()
+    asyncio.run(app.run())
 
 
-def main():
-    """Synchronous entrypoint for running the standalon app."""
-    parser = argparse.ArgumentParser(description="Tail, a terminal dashboard for Pipecat.")
-    parser.add_argument(
+entrypoint_cli_typer = typer.Typer(
+    no_args_is_help=False,
+    add_completion=False,
+    invoke_without_command=True,
+    rich_markup_mode="markdown",
+    short_help="Monitor Pipecat sessions in real-time",
+    help="ᓚᘏᗢ Pipecat Tail. See website at https://github.com/pipecat-ai/tail",
+)
+
+
+@entrypoint_cli_typer.callback()
+def cli(
+    ctx: typer.Context,
+    _version: bool = typer.Option(None, "--version", callback=version_callback, help="CLI version"),
+    _url: str = typer.Option(
+        DEFAULT_URL,
         "-u",
         "--url",
-        type=str,
-        default=DEFAULT_URL,
-        help="URL for the Tail observer (default: %(default)s)",
-    )
-    args = parser.parse_args()
-    asyncio.run(run(args.url))
-
-
-if __name__ == "__main__":
-    main()
+        callback=url_callback,
+        help="URL for the Tail observer",
+    ),
+):
+    """Pipecat Tail command."""
+    pass

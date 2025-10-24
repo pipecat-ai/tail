@@ -25,12 +25,17 @@ With Tail you can:
 ### Requirements
 
 - Python 3.10+
-- [Pipecat](https://github.com/pipecat-ai/pipecat) installed
 
 ### Install Tail for Python
 
 ```bash
 uv pip install pipecat-ai-tail
+```
+
+and also install Pipecat CLI so you can run Tail as a standalone application:
+
+```bash
+uv tool install pipecat-ai-cli
 ```
 
 ### ⚡ Option A: Pipeline runner
@@ -66,13 +71,7 @@ task = PipelineTask(..., observers=[TailObserver()])
 Then start the app:
 
 ```sh
-pctail [--uri URI]
-```
-
-or
-
-```sh
-pipecat-tail [--uri URI]
+pipecat tail [--url URL]
 ```
 
 By default, it will connect to `ws://localhost:9292`.
