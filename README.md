@@ -32,10 +32,10 @@ With Tail you can:
 uv pip install pipecat-ai-tail
 ```
 
-and also install Pipecat CLI so you can run Tail as a standalone application:
+and also install [Pipecat CLI](https://github.com/pipecat-ai/pipecat-cli) so you can run Tail as a standalone application:
 
 ```bash
-uv tool install pipecat-ai-cli
+uv tool install "pipecat-ai-cli[tail]"
 ```
 
 ### ⚡ Option A: Pipeline runner
