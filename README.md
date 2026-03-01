@@ -24,7 +24,7 @@ With Tail you can:
 
 ### Requirements
 
-- Python 3.10+
+- Python 3.11+
 
 ### Install Tail for Python
 
