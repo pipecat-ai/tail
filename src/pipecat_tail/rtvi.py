@@ -14,7 +14,13 @@ import platform
 from importlib.metadata import version
 from typing import Any, Literal, Mapping
 
-from pipecat.processors.frameworks.rtvi import RTVI_MESSAGE_LABEL, RTVIMessageLiteral
+try:
+    # pipecat >= 0.0.105
+    from pipecat.processors.frameworks.rtvi.processor import MESSAGE_LABEL as RTVI_MESSAGE_LABEL
+except ImportError:
+    from pipecat.processors.frameworks.rtvi import RTVI_MESSAGE_LABEL
+
+from pipecat.processors.frameworks.rtvi import RTVIMessageLiteral
 from pydantic import BaseModel
 
 __PIPECAT_VERSION__ = version("pipecat-ai")
