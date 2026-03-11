@@ -14,8 +14,14 @@ conversation transcript, system logs, and audio levels.
 from typing import Any, Awaitable, Callable, Dict, Mapping, Optional
 
 from loguru import logger
+
+try:
+    # pipecat >= 0.0.105
+    from pipecat.processors.frameworks.rtvi.processor import MESSAGE_LABEL as RTVI_MESSAGE_LABEL
+except ImportError:
+    from pipecat.processors.frameworks.rtvi import RTVI_MESSAGE_LABEL
+
 from pipecat.processors.frameworks.rtvi import (
-    RTVI_MESSAGE_LABEL,
     RTVIBotAudioLevelMessage,
     RTVIBotTTSTextMessage,
     RTVIMetricsMessage,
