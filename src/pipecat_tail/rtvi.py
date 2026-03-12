@@ -16,11 +16,11 @@ from typing import Any, Literal, Mapping
 
 try:
     # pipecat >= 0.0.105
-    from pipecat.processors.frameworks.rtvi.models import MESSAGE_LABEL as RTVI_MESSAGE_LABEL
+    from pipecat.processors.frameworks.rtvi.models import (
+        MESSAGE_LABEL as RTVI_MESSAGE_LABEL,
+    )
 except ImportError:
     from pipecat.processors.frameworks.rtvi import RTVI_MESSAGE_LABEL
-
-from pipecat.processors.frameworks.rtvi import RTVIMessageLiteral
 from pydantic import BaseModel
 
 __PIPECAT_VERSION__ = version("pipecat-ai")
@@ -31,7 +31,7 @@ __PYTHON_VERSION__ = platform.python_version()
 class RTVITailReadyMessage(BaseModel):
     """Message indicating the beginning of a Tail connection."""
 
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    label: Literal["rtvi-ai"] = RTVI_MESSAGE_LABEL
     type: Literal["tail-ready"] = "tail-ready"
     data: Mapping[str, Any] = {
         "pipecat": __PIPECAT_VERSION__,
@@ -43,5 +43,5 @@ class RTVITailReadyMessage(BaseModel):
 class RTVITailPipelineFinishedMessage(BaseModel):
     """Message indicating the pipeline has finished."""
 
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    label: Literal["rtvi-ai"] = RTVI_MESSAGE_LABEL
     type: Literal["tail-pipeline-finished"] = "tail-pipeline-finished"

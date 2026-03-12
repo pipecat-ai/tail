@@ -17,18 +17,37 @@ from loguru import logger
 
 try:
     # pipecat >= 0.0.105
-    from pipecat.processors.frameworks.rtvi.models import MESSAGE_LABEL as RTVI_MESSAGE_LABEL
+    from pipecat.processors.frameworks.rtvi.models import (
+        MESSAGE_LABEL as RTVI_MESSAGE_LABEL,
+    )
+    from pipecat.processors.frameworks.rtvi.models import (
+        BotAudioLevelMessage as RTVIBotAudioLevelMessage,
+    )
+    from pipecat.processors.frameworks.rtvi.models import (
+        BotTTSTextMessage as RTVIBotTTSTextMessage,
+    )
+    from pipecat.processors.frameworks.rtvi.models import (
+        MetricsMessage as RTVIMetricsMessage,
+    )
+    from pipecat.processors.frameworks.rtvi.models import (
+        SystemLogMessage as RTVISystemLogMessage,
+    )
+    from pipecat.processors.frameworks.rtvi.models import (
+        UserAudioLevelMessage as RTVIUserAudioLevelMessage,
+    )
+    from pipecat.processors.frameworks.rtvi.models import (
+        UserTranscriptionMessage as RTVIUserTranscriptionMessage,
+    )
 except ImportError:
-    from pipecat.processors.frameworks.rtvi import RTVI_MESSAGE_LABEL
-
-from pipecat.processors.frameworks.rtvi import (
-    RTVIBotAudioLevelMessage,
-    RTVIBotTTSTextMessage,
-    RTVIMetricsMessage,
-    RTVISystemLogMessage,
-    RTVIUserAudioLevelMessage,
-    RTVIUserTranscriptionMessage,
-)
+    from pipecat.processors.frameworks.rtvi import (
+        RTVI_MESSAGE_LABEL,
+        RTVIBotAudioLevelMessage,
+        RTVIBotTTSTextMessage,
+        RTVIMetricsMessage,
+        RTVISystemLogMessage,
+        RTVIUserAudioLevelMessage,
+        RTVIUserTranscriptionMessage,
+    )
 from pydantic import ValidationError
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
