@@ -1245,7 +1245,7 @@ requires-dist = [
     { name = "textual", specifier = ">=6.0.0,<7" },
     { name = "textual-plotext", specifier = ">=1.0.0,<2" },
     { name = "typer", specifier = ">=0.20.0,<1" },
-    { name = "websockets", specifier = ">=13.1,<15.0" },
+    { name = "websockets", specifier = ">=13.1,<16.0" },
 ]
 
 [package.metadata.requires-dev]

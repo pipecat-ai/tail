@@ -24,7 +24,7 @@ dependencies = [
     "textual>=6.0.0,<7",
     "textual-plotext>=1.0.0,<2",
     "typer>=0.20.0,<1",
-    "websockets>=13.1,<15.0",
+    "websockets>=13.1,<16.0",
 ]
 
 [project.urls]
