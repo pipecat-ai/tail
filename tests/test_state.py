@@ -30,14 +30,21 @@ def test_synthetic_session_folds_into_state():
     spoken, total = turn2.spoken_word_counts()
     assert spoken == 8 and total == 26
 
-    assert turn3.user_interim == "okay thanks, that's all I"
-    assert not turn3.has_bot_content
+    assert turn3.user_text == "okay thanks, that's all I needed"
+    assert turn3.user_interim == ""
+    assert turn3.ended and not turn3.interrupted
+    assert turn3.latency_secs == 1.4
+    assert [seg.spoken_text for seg in turn3.segments] == [
+        "You're welcome.",
+        "Enjoy your evening in Barcelona.",
+    ]
+    assert turn3.pending_text.strip() == ""
 
-    assert len(session.latencies) == 2
+    assert len(session.latencies) == 3
     assert session.latencies[0].first_bot_speech
-    assert session.prompt_tokens == 1360
-    assert session.completion_tokens == 76
-    assert session.tts_characters == 169
+    assert session.prompt_tokens == 2620
+    assert session.completion_tokens == 90
+    assert session.tts_characters == 217
     assert ("OpenAILLMService#0", "ttfb") in session.metrics
     assert session.startup["total_duration_secs"] == 0.98
     assert session.transport_timing["client_connected_secs"] == 1.84

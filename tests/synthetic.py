@@ -851,6 +851,242 @@ def build_messages(start: float | None = None) -> list[tuple[float, dict]]:
             worker=None,
         ),
     )
+    # The user finishes, the bot signs off.
+    at(
+        13.9,
+        tail(
+            "tail-speech",
+            {"kind": "user_speech_stopped", "timestamp": t0 + 13.9, "started_at": t0 + 12.4},
+        ),
+    )
+    at(14.1, rtvi("user-stopped-speaking"))
+    at(
+        14.1,
+        tail(
+            "tail-speech",
+            {"kind": "user_turn_stopped", "timestamp": t0 + 14.1, "started_at": t0 + 12.5},
+        ),
+    )
+    at(
+        14.2,
+        rtvi(
+            "user-transcription",
+            {
+                "text": "okay thanks, that's all I needed",
+                "user_id": "u",
+                "timestamp": "",
+                "final": True,
+            },
+        ),
+    )
+    at(14.2, rtvi("user-llm-text", {"text": "okay thanks, that's all I needed"}))
+    at(14.7, rtvi("bot-llm-started"))
+    closing = "You're welcome. Enjoy your evening in Barcelona."
+    for i, word in enumerate(closing.split(" ")):
+        at(14.7 + i * 0.04, rtvi("bot-llm-text", {"text": (" " if i else "") + word}))
+    at(15.0, rtvi("bot-llm-stopped"))
+    at(
+        14.9,
+        rtvi(
+            "bot-output",
+            {
+                "text": "You're welcome.",
+                "aggregated_by": "sentence",
+                "segment_id": 31,
+                "will_be_spoken": True,
+                "spoken_status": "new",
+            },
+        ),
+    )
+    at(
+        15.0,
+        rtvi(
+            "bot-output",
+            {
+                "text": "Enjoy your evening in Barcelona.",
+                "aggregated_by": "sentence",
+                "segment_id": 32,
+                "will_be_spoken": True,
+                "spoken_status": "new",
+            },
+        ),
+    )
+    at(15.3, rtvi("bot-started-speaking"))
+    at(15.3, tail("tail-speech", {"kind": "bot_speech_started", "timestamp": t0 + 15.3}))
+    at(
+        15.3,
+        tail(
+            "tail-latency",
+            {
+                "latency_secs": 1.4,
+                "first_bot_speech": False,
+                "measured_from": "user_silence",
+                "total_secs": 1.4,
+                "contributions": [
+                    {
+                        "key": "endpointing_wait",
+                        "label": "endpointing wait",
+                        "owner": "config: VAD stop_secs",
+                        "owner_kind": "setting",
+                        "start_time": t0 + 13.9,
+                        "duration_secs": 0.2,
+                    },
+                    {
+                        "key": "transcription",
+                        "label": "transcription",
+                        "owner": "DeepgramSTTService#0",
+                        "owner_kind": "service",
+                        "start_time": t0 + 14.1,
+                        "duration_secs": 0.1,
+                    },
+                    {
+                        "key": "llm_inference",
+                        "label": "LLM inference",
+                        "owner": "OpenAILLMService#0",
+                        "owner_kind": "service",
+                        "start_time": t0 + 14.2,
+                        "duration_secs": 0.7,
+                    },
+                    {
+                        "key": "speech_synthesis",
+                        "label": "speech synthesis",
+                        "owner": "CartesiaTTSService#0",
+                        "owner_kind": "service",
+                        "start_time": t0 + 14.9,
+                        "duration_secs": 0.4,
+                    },
+                ],
+            },
+        ),
+    )
+    at(
+        15.3,
+        tail(
+            "tail-service-latency",
+            {
+                "kind": "ttfb",
+                "processor": "OpenAILLMService#0",
+                "model": "gpt-4o",
+                "timestamp": t0 + 15.3,
+                "seconds": 0.48,
+            },
+        ),
+    )
+    at(
+        15.3,
+        tail(
+            "tail-service-latency",
+            {
+                "kind": "ttfb",
+                "processor": "DeepgramSTTService#0",
+                "model": "nova-3",
+                "timestamp": t0 + 15.3,
+                "seconds": 0.25,
+            },
+        ),
+    )
+    at(
+        15.3,
+        tail(
+            "tail-service-latency",
+            {
+                "kind": "ttfb",
+                "processor": "CartesiaTTSService#0",
+                "model": "sonic-2",
+                "timestamp": t0 + 15.3,
+                "seconds": 0.15,
+            },
+        ),
+    )
+    at(
+        15.3,
+        tail(
+            "tail-service-usage",
+            {
+                "kind": "llm",
+                "processor": "OpenAILLMService#0",
+                "model": "gpt-4o",
+                "timestamp": t0 + 15.3,
+                "prompt_tokens": 1260,
+                "completion_tokens": 14,
+                "total_tokens": 1274,
+            },
+        ),
+    )
+    at(
+        15.3,
+        tail(
+            "tail-service-usage",
+            {
+                "kind": "stt",
+                "processor": "DeepgramSTTService#0",
+                "model": "nova-3",
+                "timestamp": t0 + 15.3,
+                "audio_seconds": 1.5,
+            },
+        ),
+    )
+    at(
+        15.3,
+        tail(
+            "tail-service-usage",
+            {
+                "kind": "tts",
+                "processor": "CartesiaTTSService#0",
+                "model": "sonic-2",
+                "timestamp": t0 + 15.3,
+                "characters": 48,
+            },
+        ),
+    )
+    at(
+        15.8,
+        rtvi(
+            "bot-output",
+            {
+                "text": "You're welcome.",
+                "aggregated_by": "sentence",
+                "segment_id": 31,
+                "will_be_spoken": True,
+                "spoken_status": "completed",
+                "spoken_progress": {"accumulated_text": "You're welcome.", "remaining_text": ""},
+            },
+        ),
+    )
+    at(
+        17.2,
+        rtvi(
+            "bot-output",
+            {
+                "text": "Enjoy your evening in Barcelona.",
+                "aggregated_by": "sentence",
+                "segment_id": 32,
+                "will_be_spoken": True,
+                "spoken_status": "completed",
+                "spoken_progress": {
+                    "accumulated_text": "Enjoy your evening in Barcelona.",
+                    "remaining_text": "",
+                },
+            },
+        ),
+    )
+    for i in range(12):
+        at(15.3 + i * 0.15, rtvi("bot-audio-level", {"value": 0.25 + 0.1 * (i % 5)}))
+    at(17.3, rtvi("bot-stopped-speaking"))
+    at(
+        17.3,
+        tail(
+            "tail-speech",
+            {"kind": "bot_speech_stopped", "timestamp": t0 + 17.3, "started_at": t0 + 15.3},
+        ),
+    )
+    at(
+        19.8,
+        tail(
+            "tail-turn",
+            {"kind": "ended", "turn": 3, "duration_secs": 7.3, "was_interrupted": False},
+        ),
+    )
     return out
 
 

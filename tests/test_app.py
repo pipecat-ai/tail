@@ -30,7 +30,7 @@ async def test_tabs_render_the_session():
         assert "connected" in strip
         assert "bot-1" in strip
         assert "turn #3" in strip
-        assert "2.70s" in strip
+        assert "1.40s" in strip
 
         assert app.banner.display
         assert "DailyOutputTransport#0" in str(app.banner.content)

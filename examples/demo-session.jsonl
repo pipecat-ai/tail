@@ -126,3 +126,45 @@
 {"t":1789000013.1,"message":{"label":"tail","type":"tail-log","timestamp":1789000013.1,"worker":"bot-1","data":{"time":"2026-09-16T09:40:24.610","level":"ERROR","name":"pipecat.transports.daily","function":"_on_error","line":512,"message":"ErrorFrame: audio track lost, reconnecting"}}}
 {"t":1789000013.4,"message":{"label":"tail","type":"tail-bus","timestamp":1789000013.4,"data":{"name":"BusWorkerErrorMessage#1","message_type":"BusWorkerErrorMessage","category":"lifecycle","source":"bot-1","target":null,"payload":{"error":"audio track lost, reconnecting"}}}}
 {"t":1789000013.5,"message":{"label":"tail","type":"tail-job","timestamp":1789000013.5,"data":{"kind":"updated","job_id":"a91f2c3d4e","source":"bot-1","target":"runner-1","update":{"state":"audio_restored"}}}}
+{"t":1789000013.9,"message":{"label":"tail","type":"tail-speech","timestamp":1789000013.9,"worker":"bot-1","data":{"kind":"user_speech_stopped","timestamp":1789000013.9,"started_at":1789000012.4}}}
+{"t":1789000014.1,"message":{"label":"rtvi-ai","type":"user-stopped-speaking","worker":"bot-1"}}
+{"t":1789000014.1,"message":{"label":"tail","type":"tail-speech","timestamp":1789000014.1,"worker":"bot-1","data":{"kind":"user_turn_stopped","timestamp":1789000014.1,"started_at":1789000012.5}}}
+{"t":1789000014.2,"message":{"label":"rtvi-ai","type":"user-transcription","worker":"bot-1","data":{"text":"okay thanks, that's all I needed","user_id":"u","timestamp":"","final":true}}}
+{"t":1789000014.2,"message":{"label":"rtvi-ai","type":"user-llm-text","worker":"bot-1","data":{"text":"okay thanks, that's all I needed"}}}
+{"t":1789000014.7,"message":{"label":"rtvi-ai","type":"bot-llm-started","worker":"bot-1"}}
+{"t":1789000014.7,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":"You're"}}}
+{"t":1789000014.74,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" welcome."}}}
+{"t":1789000014.78,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" Enjoy"}}}
+{"t":1789000014.82,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" your"}}}
+{"t":1789000014.86,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" evening"}}}
+{"t":1789000014.9,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" in"}}}
+{"t":1789000014.94,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" Barcelona."}}}
+{"t":1789000015.0,"message":{"label":"rtvi-ai","type":"bot-llm-stopped","worker":"bot-1"}}
+{"t":1789000014.9,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"You're welcome.","aggregated_by":"sentence","segment_id":31,"will_be_spoken":true,"spoken_status":"new"}}}
+{"t":1789000015.0,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"Enjoy your evening in Barcelona.","aggregated_by":"sentence","segment_id":32,"will_be_spoken":true,"spoken_status":"new"}}}
+{"t":1789000015.3,"message":{"label":"rtvi-ai","type":"bot-started-speaking","worker":"bot-1"}}
+{"t":1789000015.3,"message":{"label":"tail","type":"tail-speech","timestamp":1789000015.3,"worker":"bot-1","data":{"kind":"bot_speech_started","timestamp":1789000015.3}}}
+{"t":1789000015.3,"message":{"label":"tail","type":"tail-latency","timestamp":1789000015.3,"worker":"bot-1","data":{"latency_secs":1.4,"first_bot_speech":false,"measured_from":"user_silence","total_secs":1.4,"contributions":[{"key":"endpointing_wait","label":"endpointing wait","owner":"config: VAD stop_secs","owner_kind":"setting","start_time":1789000013.9,"duration_secs":0.2},{"key":"transcription","label":"transcription","owner":"DeepgramSTTService#0","owner_kind":"service","start_time":1789000014.1,"duration_secs":0.1},{"key":"llm_inference","label":"LLM inference","owner":"OpenAILLMService#0","owner_kind":"service","start_time":1789000014.2,"duration_secs":0.7},{"key":"speech_synthesis","label":"speech synthesis","owner":"CartesiaTTSService#0","owner_kind":"service","start_time":1789000014.9,"duration_secs":0.4}]}}}
+{"t":1789000015.3,"message":{"label":"tail","type":"tail-service-latency","timestamp":1789000015.3,"worker":"bot-1","data":{"kind":"ttfb","processor":"OpenAILLMService#0","model":"gpt-4o","timestamp":1789000015.3,"seconds":0.48}}}
+{"t":1789000015.3,"message":{"label":"tail","type":"tail-service-latency","timestamp":1789000015.3,"worker":"bot-1","data":{"kind":"ttfb","processor":"DeepgramSTTService#0","model":"nova-3","timestamp":1789000015.3,"seconds":0.25}}}
+{"t":1789000015.3,"message":{"label":"tail","type":"tail-service-latency","timestamp":1789000015.3,"worker":"bot-1","data":{"kind":"ttfb","processor":"CartesiaTTSService#0","model":"sonic-2","timestamp":1789000015.3,"seconds":0.15}}}
+{"t":1789000015.3,"message":{"label":"tail","type":"tail-service-usage","timestamp":1789000015.3,"worker":"bot-1","data":{"kind":"llm","processor":"OpenAILLMService#0","model":"gpt-4o","timestamp":1789000015.3,"prompt_tokens":1260,"completion_tokens":14,"total_tokens":1274}}}
+{"t":1789000015.3,"message":{"label":"tail","type":"tail-service-usage","timestamp":1789000015.3,"worker":"bot-1","data":{"kind":"stt","processor":"DeepgramSTTService#0","model":"nova-3","timestamp":1789000015.3,"audio_seconds":1.5}}}
+{"t":1789000015.3,"message":{"label":"tail","type":"tail-service-usage","timestamp":1789000015.3,"worker":"bot-1","data":{"kind":"tts","processor":"CartesiaTTSService#0","model":"sonic-2","timestamp":1789000015.3,"characters":48}}}
+{"t":1789000015.8,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"You're welcome.","aggregated_by":"sentence","segment_id":31,"will_be_spoken":true,"spoken_status":"completed","spoken_progress":{"accumulated_text":"You're welcome.","remaining_text":""}}}}
+{"t":1789000017.2,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"Enjoy your evening in Barcelona.","aggregated_by":"sentence","segment_id":32,"will_be_spoken":true,"spoken_status":"completed","spoken_progress":{"accumulated_text":"Enjoy your evening in Barcelona.","remaining_text":""}}}}
+{"t":1789000015.3,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.25}}}
+{"t":1789000015.45,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.35}}}
+{"t":1789000015.6,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.45}}}
+{"t":1789000015.75,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.55}}}
+{"t":1789000015.9,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.65}}}
+{"t":1789000016.05,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.25}}}
+{"t":1789000016.2,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.35}}}
+{"t":1789000016.35,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.45}}}
+{"t":1789000016.5,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.55}}}
+{"t":1789000016.65,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.65}}}
+{"t":1789000016.8,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.25}}}
+{"t":1789000016.95,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.35}}}
+{"t":1789000017.3,"message":{"label":"rtvi-ai","type":"bot-stopped-speaking","worker":"bot-1"}}
+{"t":1789000017.3,"message":{"label":"tail","type":"tail-speech","timestamp":1789000017.3,"worker":"bot-1","data":{"kind":"bot_speech_stopped","timestamp":1789000017.3,"started_at":1789000015.3}}}
+{"t":1789000019.8,"message":{"label":"tail","type":"tail-turn","timestamp":1789000019.8,"worker":"bot-1","data":{"kind":"ended","turn":3,"duration_secs":7.3,"was_interrupted":false}}}
