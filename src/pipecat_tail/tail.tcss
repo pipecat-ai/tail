@@ -55,6 +55,7 @@ TabPane {
 
 #speaking-timeline {
     height: 8;
+    border-subtitle-align: left;
     border: round $primary;
     border-title-color: $secondary;
     border-subtitle-color: $text-muted;

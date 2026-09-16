@@ -36,6 +36,23 @@ from pipecat_tail.widgets.render import (
 MAX_ROWS = 14
 TIMELINE_SECS = 30.0
 
+# The order the waits happen in a turn, for the legend.
+CONTRIBUTION_ORDER = [
+    "endpointing_wait",
+    "first_request",
+    "transcription",
+    "turn_detection",
+    "turn_completion",
+    "waiting_for_user",
+    "llm_inference",
+    "llm_tool_call",
+    "function_handler",
+    "sentence_aggregation",
+    "awaiting_speakable_text",
+    "speech_synthesis",
+    "output_transport",
+]
+
 
 class LatencyBars(Static):
     """Stacked bar per turn, with percentiles and a legend."""
@@ -116,9 +133,6 @@ class LatencyBars(Static):
             text.append("\n")
 
         text.append("\n")
-        text.append_text(self._legend(records))
-        text.append("\n")
-
         values = [r.latency_secs for r in session.latencies if not r.first_bot_speech]
         if not values:
             values = [r.latency_secs for r in session.latencies]
@@ -138,10 +152,14 @@ class LatencyBars(Static):
             text.append("   llm share ", style=STYLE_LABEL)
             text.append(f"{share:.0%}", style=STYLE_TEXT)
         text.append(f"   turns {len(session.latencies)}", style=STYLE_DIM)
+        text.append("\n\n")
+        text.append_text(self._legend(records))
         return text
 
     @staticmethod
     def _legend(records: list[LatencyRecord]) -> Text:
+        # One line per kind of wait, in the order they appear in a turn, with
+        # the service or setting that owns it.
         seen: dict[str, tuple[str, str]] = {}
         for record in records:
             for c in record.contributions:
@@ -149,15 +167,31 @@ class LatencyBars(Static):
                 if key and key not in seen:
                     seen[key] = (str(c.get("label", key)), str(c.get("owner", "")))
         text = Text()
-        for key, (label, owner) in seen.items():
-            text.append("■ ", style=Style(color=contribution_color(key)))
-            text.append(label, style=STYLE_TEXT)
-            if owner:
-                text.append(f" {owner}", style=STYLE_DIM)
-            text.append("   ")
         if not seen:
             text.append("■ ", style=Style(color=DIM))
-            text.append("total only: enable_metrics is off, so no breakdown", style=STYLE_DIM)
+            text.append("total only", style=STYLE_TEXT)
+            text.append(
+                "  enable_metrics is off, so there is no breakdown per service", style=STYLE_DIM
+            )
+            return text
+        text.append("what each color is, in the order it happens in a turn\n", style=STYLE_LABEL)
+        width = max(len(label) for label, _ in seen.values())
+
+        def order(item):
+            key = item[0]
+            return (
+                CONTRIBUTION_ORDER.index(key)
+                if key in CONTRIBUTION_ORDER
+                else len(CONTRIBUTION_ORDER)
+            )
+
+        for key, (label, owner) in sorted(seen.items(), key=order):
+            text.append("■ ", style=Style(color=contribution_color(key)))
+            text.append(f"{label:<{width}}", style=STYLE_TEXT)
+            if owner:
+                text.append(f"   {owner}", style=STYLE_DIM)
+            text.append("\n")
+        text.rstrip()
         return text
 
 
@@ -188,8 +222,13 @@ class SpeakingTimeline(Static):
     def __init__(self):
         """Create the widget."""
         super().__init__(Text(""), id="speaking-timeline")
-        self.border_title = "Speaking timeline"
-        self.border_subtitle = f"last {TIMELINE_SECS:.0f} s"
+        self.border_title = f"Speaking timeline · last {TIMELINE_SECS:.0f} s"
+        self.border_subtitle = (
+            f"[{GREEN}]▇ vad[/] raw speech detection   "
+            f"[{FROST_CYAN}]━ user[/] turn ruling   "
+            f"[{PURPLE}]━ bot[/] speaking   "
+            f"[{RED}]╳[/] interruption"
+        )
         self._session: Optional[WorkerSession] = None
 
     def set_session(self, session: WorkerSession) -> None:
