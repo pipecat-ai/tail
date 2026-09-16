@@ -91,15 +91,17 @@ class LatencyBars(Vertical):
         self.border_title = "Per-turn latency"
         self.border_subtitle = "user stops speaking → bot starts speaking"
         self._session: Optional[WorkerSession] = None
-        self._ruler = Static(Text(""), id="latency-ruler")
+        self._ruler = Static(Text(""), classes="latency-ruler")
+        self._ruler_bottom = Static(Text(""), classes="latency-ruler")
         self._scroll = VerticalScroll(id="latency-scroll")
         self._body = Static(Text(""))
 
     def compose(self):
-        """Compose the fixed scale and the scrolling bars."""
+        """Compose the scale above and below the scrolling bars."""
         yield self._ruler
         with self._scroll:
             yield self._body
+        yield self._ruler_bottom
 
     def set_session(self, session: WorkerSession) -> None:
         """Point the widget at a session and re-render."""
@@ -114,10 +116,12 @@ class LatencyBars(Vertical):
         """Re-render from the session and keep the newest turn in view."""
         session = self._session
         if session is None or not session.latencies:
-            self._ruler.update(Text(""))
+            ruler = Text("")
         else:
             records = session.latencies[-MAX_ROWS:]
-            self._ruler.update(_ruler(_scale_for(records), _bar_width(self.size.width)))
+            ruler = _ruler(_scale_for(records), _bar_width(self.size.width))
+        self._ruler.update(ruler)
+        self._ruler_bottom.update(ruler.copy())
         self._body.update(self._build())
         self.call_after_refresh(self._scroll.scroll_end, animate=False)
 

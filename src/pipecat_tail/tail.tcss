@@ -62,7 +62,7 @@ TabPane {
     padding: 0 1;
 }
 
-#latency-ruler {
+.latency-ruler {
     height: 1;
 }
 
