@@ -15,6 +15,11 @@ from textual.widgets import Static
 
 from pipecat_tail.state import FunctionCall, Turn, WorkerSession
 from pipecat_tail.widgets.render import (
+    BRIGHT,
+    DIM,
+    FROST_CYAN,
+    PURPLE,
+    RED,
     STYLE_BOT,
     STYLE_BRIGHT,
     STYLE_DIM,
@@ -25,6 +30,7 @@ from pipecat_tail.widgets.render import (
     STYLE_TEXT,
     STYLE_TOOL,
     STYLE_USER,
+    YELLOW,
     fmt_clock,
     fmt_secs,
     fmt_secs_fixed,
@@ -175,11 +181,8 @@ class ConversationView(VerticalScroll):
         self._session: Optional[WorkerSession] = None
         self._panels: dict[int, TurnPanel] = {}
         self.following = True
-        self._legend = Static(_legend(), classes="legend")
-
-    def compose(self):
-        """Compose the legend."""
-        yield self._legend
+        self.border_title = "Conversation"
+        self.border_subtitle = _legend()
 
     def sync(self, session: WorkerSession) -> None:
         """Bring the panels in line with the session's turns."""
@@ -202,7 +205,7 @@ class ConversationView(VerticalScroll):
                 self._panels[key] = panel
                 new_panels.append(panel)
         if new_panels:
-            self.mount(*new_panels, before=self._legend)
+            self.mount(*new_panels)
 
         # Only the most recent turns change; refreshing all would be wasteful.
         for turn in list(session.turns)[-2:]:
@@ -221,14 +224,12 @@ class ConversationView(VerticalScroll):
         return self.following
 
 
-def _legend() -> Text:
-    text = Text()
-    text.append("spoken ", style=STYLE_DIM)
-    text.append("bright", style=STYLE_BRIGHT)
-    text.append("   not yet spoken ", style=STYLE_DIM)
-    text.append("dim", style=STYLE_DIM)
-    text.append("   interrupted ", style=STYLE_DIM)
-    text.append("struck", style=STYLE_STRUCK)
-    text.append("   interim ", style=STYLE_DIM)
-    text.append("italic", style=STYLE_INTERIM)
-    return text
+def _legend() -> str:
+    # Rendered in the panel's bottom border, so it is Textual markup. Every
+    # entry uses the style the transcript itself uses for that thing.
+    return (
+        f"[{FROST_CYAN} bold]user[/]  [{PURPLE} bold]bot[/]  "
+        f"[{BRIGHT} bold]spoken[/]  [{DIM}]not yet spoken[/]  "
+        f"[{DIM} italic]interim[/]  [{DIM} strike]interrupted[/] [{RED} bold]✂[/]  "
+        f"[{YELLOW}]▸ tool call[/]"
+    )

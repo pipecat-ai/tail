@@ -30,16 +30,12 @@ TabPane {
     height: 1fr;
     border: round $primary;
     border-title-color: $secondary;
+    border-subtitle-align: left;
     padding: 0 1;
 }
 
 #conversation-view .turn {
     margin-bottom: 1;
-}
-
-#conversation-view .legend {
-    color: $text-muted;
-    margin-top: 1;
 }
 
 /* Latency */
