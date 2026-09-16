@@ -35,7 +35,17 @@ TabPane {
 }
 
 #conversation-view .turn {
+    padding: 0 1;
     margin-bottom: 1;
+    border-left: wide $primary 60%;
+}
+
+#conversation-view .turn.alt {
+    background: $boost;
+}
+
+#conversation-view .turn.interrupted {
+    border-left: wide $error;
 }
 
 /* Latency */

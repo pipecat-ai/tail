@@ -170,6 +170,7 @@ class TurnPanel(Static):
     def refresh_turn(self) -> None:
         """Re-render from the turn."""
         self.update(render_turn(self.turn))
+        self.set_class(self.turn.interrupted, "interrupted")
 
 
 class ConversationView(VerticalScroll):
@@ -212,6 +213,13 @@ class ConversationView(VerticalScroll):
             panel = self._panels.get(id(turn))
             if panel is not None and panel not in new_panels:
                 panel.refresh_turn()
+
+        # Alternate backgrounds so turns read as blocks.
+        for index, turn in enumerate(session.turns):
+            panel = self._panels.get(id(turn))
+            if panel is not None:
+                panel.set_class(index % 2 == 1, "alt")
+                panel.set_class(turn.interrupted, "interrupted")
 
         if self.following:
             self.call_after_refresh(self.scroll_end, animate=False)
