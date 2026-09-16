@@ -98,10 +98,12 @@ def tail_serializer(obj: Any) -> Any:
 
 
 class TailMessage(BaseModel):
-    """Base class for every message Tail generates itself."""
+    """Base class for every message Tail generates itself.
+
+    Subclasses add a ``type`` literal.
+    """
 
     label: Literal["tail"] = TAIL_LABEL
-    type: str
     worker: Optional[str] = None
     timestamp: float = Field(default_factory=time.time)
 

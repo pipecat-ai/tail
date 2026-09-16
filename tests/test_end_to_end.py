@@ -198,3 +198,58 @@ async def test_standalone_observer_with_callback_sink():
     assert "proc" in started["data"]["processors"]
     # Messages are untagged when the observer does not know its worker.
     assert all("worker" not in m for m in received)
+
+
+@pytest.mark.asyncio
+async def test_tail_runner_feeds_the_app_queue(monkeypatch):
+    """TailRunner attaches observers and feeds the app process through a queue.
+
+    The Textual app needs a terminal, so the app thread is replaced by a
+    reader that drains the queue until the runner sends the end marker.
+    """
+    from pipecat_tail.runner import TailRunner
+
+    logger.remove()
+    received: list[dict] = []
+
+    def fake_app_thread(self):
+        # Stand in for the user: read until the pipeline is over, then quit.
+        while True:
+            message = self._queue.get()
+            if message is None:
+                return
+            received.append(message)
+            if message.get("type") == "tail-pipeline-finished":
+                return
+
+    monkeypatch.setattr(TailRunner, "_app_thread", fake_app_thread)
+
+    processor = Passthrough(name="proc")
+    worker = PipelineWorker(
+        Pipeline([processor]),
+        name="bot-3",
+        params=PipelineParams(enable_metrics=True),
+        idle_timeout_secs=None,
+    )
+    runner = TailRunner()
+    await runner.add_workers(worker)
+    run_task = asyncio.create_task(runner.run())
+    try:
+        for _ in range(50):
+            if worker.started_at:
+                break
+            await asyncio.sleep(0.1)
+        await asyncio.sleep(0.3)
+        await worker.queue_frames(frames("proc"))
+        await asyncio.wait_for(run_task, 15.0)
+    finally:
+        if not run_task.done():
+            await runner.cancel()
+            await asyncio.wait_for(run_task, 5.0)
+    logger.add(lambda _: None)
+
+    types = [m["type"] for m in received]
+    assert "tail-workers" in types
+    assert "user-transcription" in types
+    assert "tail-pipeline-finished" in types
+    assert all(m["worker"] == "bot-3" for m in received if m["type"] == "user-transcription")

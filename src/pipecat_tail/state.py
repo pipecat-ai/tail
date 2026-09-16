@@ -728,6 +728,9 @@ class SessionState:
             case "tail-job":
                 return self._apply_job(data, timestamp)
             case "tail-bus":
+                payload = data.get("payload")
+                if not isinstance(payload, dict):
+                    payload = {}
                 self.bus.append(
                     BusRecord(
                         timestamp=timestamp,
@@ -736,9 +739,7 @@ class SessionState:
                         category=str(data.get("category", "other")),
                         source=data.get("source"),
                         target=data.get("target"),
-                        payload=data.get("payload")
-                        if isinstance(data.get("payload"), dict)
-                        else {},
+                        payload=payload,
                     )
                 )
                 return {BUS}

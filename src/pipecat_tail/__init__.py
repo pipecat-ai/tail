@@ -11,6 +11,13 @@ are imported lazily so that the app itself, which does not need Pipecat, can
 start quickly.
 """
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pipecat_tail.observer import TailObserver
+    from pipecat_tail.runner import TailRunner
+    from pipecat_tail.server import TailServer
+
 __all__ = ["TailObserver", "TailRunner", "TailServer"]
 
 

@@ -201,7 +201,8 @@ class TailServer(BaseWorker):
         """Deliver one message to the app."""
         await self._sink.emit(message)
         if message.get("type") == "tail-pipeline-finished":
-            done = self._pipeline_done.get(message.get("worker"))
+            worker = message.get("worker")
+            done = self._pipeline_done.get(worker) if isinstance(worker, str) else None
             if done is not None:
                 done.set()
 
