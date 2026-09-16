@@ -161,6 +161,7 @@ class TailServer(BaseWorker):
         exclude_bus_frames: tuple[type[Frame], ...] = DEFAULT_EXCLUDE_BUS_FRAMES,
         auto_stop: bool = True,
     ):
+        """Initialize the server. See the class docstring for the arguments."""
         super().__init__(name)
         self._server: Optional[TailWebSocketServer] = None
         if sink is None:
@@ -172,6 +173,7 @@ class TailServer(BaseWorker):
         self._exclude_bus_frames = exclude_bus_frames
         self._auto_stop = auto_stop
         self._observed: dict[str, BaseWorker] = {}
+        self._pipeline_done: dict[str, asyncio.Event] = {}
         self._registry_snapshot: Optional[dict[str, Any]] = None
         self._watch_task: Optional[asyncio.Task] = None
 
@@ -191,12 +193,17 @@ class TailServer(BaseWorker):
             An observer whose messages flow through this server.
         """
         self._observed[worker.name] = worker
+        self._pipeline_done[worker.name] = asyncio.Event()
         self._maybe_watch()
         return TailObserver(sink=self, worker=worker, **kwargs)
 
     async def emit(self, message: dict[str, Any]) -> None:
         """Deliver one message to the app."""
         await self._sink.emit(message)
+        if message.get("type") == "tail-pipeline-finished":
+            done = self._pipeline_done.get(message.get("worker"))
+            if done is not None:
+                done.set()
 
     #
     # Worker lifecycle
@@ -245,6 +252,14 @@ class TailServer(BaseWorker):
             for worker in pending:
                 seen.add(worker.name)
                 await worker.wait()
+                # The worker finishes before its observers are cleaned up, so
+                # give the observer a moment to report the pipeline finished.
+                done = self._pipeline_done.get(worker.name)
+                if done is not None:
+                    try:
+                        await asyncio.wait_for(done.wait(), timeout=3.0)
+                    except asyncio.TimeoutError:
+                        pass
         logger.debug("ᓚᘏᗢ Tail: all observed pipelines finished, stopping")
         self._watch_task = None
         await self.stop()

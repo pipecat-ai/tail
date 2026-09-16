@@ -140,7 +140,15 @@ class TailWebSocketServer:
         logger.debug(f"ᓚᘏᗢ Tail running at {self.url}")
 
     async def stop(self) -> None:
-        """Stop serving and disconnect the client."""
+        """Stop serving and disconnect the client.
+
+        Messages already queued for a connected client are sent first.
+        """
+        if self._client and self._send_queue and not self._send_queue.empty():
+            try:
+                await asyncio.wait_for(self._send_queue.join(), timeout=2.0)
+            except asyncio.TimeoutError:
+                logger.debug("ᓚᘏᗢ Tail: gave up flushing queued messages")
         if self._client:
             try:
                 await self._client.close(reason="Tail shutting down")
@@ -171,14 +179,17 @@ class TailWebSocketServer:
         assert self._send_queue
         while True:
             encoded = await self._send_queue.get()
-            client = self._client
-            if not client:
-                continue
             try:
-                await client.send(encoded)
-            except Exception as e:
-                logger.debug(f"ᓚᘏᗢ Tail: send failed, client gone: {e}")
-                self._client = None
+                client = self._client
+                if not client:
+                    continue
+                try:
+                    await client.send(encoded)
+                except Exception as e:
+                    logger.debug(f"ᓚᘏᗢ Tail: send failed, client gone: {e}")
+                    self._client = None
+            finally:
+                self._send_queue.task_done()
 
     async def _client_handler(self, client) -> None:
         if self._client:
@@ -188,14 +199,17 @@ class TailWebSocketServer:
 
         logger.debug(f"ᓚᘏᗢ Tail: client connected {client.remote_address}")
         try:
-            if not self._first_client_seen:
-                self._first_client_seen = True
-                for encoded in self._buffer:
-                    await client.send(encoded)
-                self._buffer.clear()
             self._client = client
+            # The ready message goes first, then whatever the first client
+            # missed, all through the send queue so the order holds.
             if self._on_client_connected:
                 await self._on_client_connected()
+            if not self._first_client_seen:
+                self._first_client_seen = True
+                assert self._send_queue
+                for encoded in self._buffer:
+                    self._send_queue.put_nowait(encoded)
+                self._buffer.clear()
             async for _ in client:
                 pass
         except Exception as e:

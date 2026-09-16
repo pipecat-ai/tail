@@ -46,6 +46,7 @@ class TailClient:
         min_backoff_secs: float = 0.5,
         max_backoff_secs: float = 10.0,
     ):
+        """Initialize the client. See the class docstring for the arguments."""
         self._url = url
         self._on_message = on_message
         self._on_status = on_status

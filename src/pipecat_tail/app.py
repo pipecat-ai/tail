@@ -4,459 +4,334 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Textual-based dashboard for Pipecat.
+"""The Tail Textual application.
 
-This module defines a Textual-based application composed of three panels (left,
-middle, right). It receives RTVI messages and updates widgets such as metrics,
-conversation transcript, system logs, and audio levels.
+``TailApp`` receives wire messages through ``handle_message()``, folds them
+into a ``SessionState`` and refreshes the widgets that show what changed. A
+persistent strip under the header answers the questions that matter on every
+tab; five tabs hold the detail: Conversation, Latency, Workers, Metrics and
+Logs.
+
+The app knows nothing about where messages come from. The standalone CLI feeds
+it from a websocket or a session file, and ``TailRunner`` from a queue.
 """
 
-from typing import Any, Awaitable, Callable, Dict, Mapping, Optional
+from typing import Any, Awaitable, Callable, Optional
 
-from loguru import logger
-
-try:
-    # pipecat >= 0.0.105
-    from pipecat.processors.frameworks.rtvi.models import (
-        MESSAGE_LABEL as RTVI_MESSAGE_LABEL,
-    )
-    from pipecat.processors.frameworks.rtvi.models import (
-        BotAudioLevelMessage as RTVIBotAudioLevelMessage,
-    )
-    from pipecat.processors.frameworks.rtvi.models import (
-        BotTTSTextMessage as RTVIBotTTSTextMessage,
-    )
-    from pipecat.processors.frameworks.rtvi.models import (
-        MetricsMessage as RTVIMetricsMessage,
-    )
-    from pipecat.processors.frameworks.rtvi.models import (
-        SystemLogMessage as RTVISystemLogMessage,
-    )
-    from pipecat.processors.frameworks.rtvi.models import (
-        UserAudioLevelMessage as RTVIUserAudioLevelMessage,
-    )
-    from pipecat.processors.frameworks.rtvi.models import (
-        UserTranscriptionMessage as RTVIUserTranscriptionMessage,
-    )
-except ImportError:
-    from pipecat.processors.frameworks.rtvi import (
-        RTVI_MESSAGE_LABEL,
-        RTVIBotAudioLevelMessage,
-        RTVIBotTTSTextMessage,
-        RTVIMetricsMessage,
-        RTVISystemLogMessage,
-        RTVIUserAudioLevelMessage,
-        RTVIUserTranscriptionMessage,
-    )
-from pydantic import ValidationError
+from textual import events
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Header, Label, Rule, Static
+from textual.binding import Binding
+from textual.widgets import Footer, Header, TabbedContent, TabPane
 
-from pipecat_tail.rtvi import RTVITailReadyMessage
-from pipecat_tail.widgets.audio_level import AudioLevel
-from pipecat_tail.widgets.conversation import Conversation
-from pipecat_tail.widgets.llm_service_info import LLMServiceInfo
-from pipecat_tail.widgets.service_metrics import ServiceMetrics
-from pipecat_tail.widgets.system_info import SystemInfo
-from pipecat_tail.widgets.system_logs import SystemLogs
-from pipecat_tail.widgets.system_status import SystemStatus
-from pipecat_tail.widgets.tts_service_info import TTSServiceInfo
+from pipecat_tail.session import SessionWriter
+from pipecat_tail.state import (
+    BUS,
+    CONVERSATION,
+    ERRORS,
+    JOBS,
+    LATENCY,
+    LOGS,
+    METRICS,
+    STARTUP,
+    STATUS,
+    STRIP,
+    WORKERS,
+    SessionState,
+)
+from pipecat_tail.widgets.conversation import ConversationView
+from pipecat_tail.widgets.latency import LatencyView
+from pipecat_tail.widgets.logs import LogsView
+from pipecat_tail.widgets.metrics import MetricsView
+from pipecat_tail.widgets.strip import ErrorBanner, TopStrip
+from pipecat_tail.widgets.workers import WorkersView
 
+Hook = Callable[[], Awaitable[None]]
 
-class LeftPanel(Static):
-    """Left-side panel showing service metrics.
-
-    Maintains a set of ``ServiceMetrics`` widgets keyed by processor name and
-    appends new values as metrics arrive.
-    """
-
-    def __init__(self):
-        """Initialize the panel and its internal container state."""
-        super().__init__()
-        self._metrics: Dict[str, ServiceMetrics] = {}
-        self._vertical = Vertical()
-
-    def compose(self) -> ComposeResult:
-        """Compose the service metrics layout."""
-        yield Label("Metrics")
-        yield self._vertical
-
-    async def handle_metrics_ttfb_data(self, data: Mapping[str, Any]):
-        """Handle a TTFB metrics entry.
-
-        Args:
-            data: A dict with keys ``processor`` and ``value``.
-        """
-        processor = data["processor"]
-        value = data["value"]
-        if not processor in self._metrics:
-            # Metrics
-            widget = ServiceMetrics(processor)
-            self._metrics[processor] = widget
-            self._vertical.mount(widget)
-            widget.scroll_visible()
-            # Rule
-            rule = Rule()
-            self._vertical.mount(rule)
-            rule.scroll_visible()
-        # Update metrics
-        self._metrics[processor].add_value(value)
-
-
-class MiddlePanel(Static):
-    """Middle panel with conversation transcript and system logs."""
-
-    def __init__(self):
-        """Initialize the middle panel."""
-        super().__init__()
-        self._logs = SystemLogs()
-        self._conversation = Conversation()
-
-    def compose(self) -> ComposeResult:
-        """Compose the conversation and logs layout."""
-        with Vertical():
-            yield self._conversation
-            yield self._logs
-
-    async def append_log(self, message):
-        """Append a system log line.
-
-        Args:
-            message: Text to append to logs.
-        """
-        await self._logs.append_log(message)
-
-    async def handle_user_started_speaking(self):
-        """Notify that the user started speaking."""
-        await self._conversation.handle_user_started_speaking()
-
-    async def handle_user_stopped_speaking(self):
-        """Notify that the user stopped speaking."""
-        await self._conversation.handle_user_stopped_speaking()
-
-    async def handle_user_transcription(self, text: str):
-        """Append user transcription to the conversation.
-
-        Args:
-            text: Transcribed user text.
-        """
-        await self._conversation.handle_user_transcription(text)
-
-    async def handle_bot_started_speaking(self):
-        """Notify that the bot started speaking."""
-        await self._conversation.handle_bot_started_speaking()
-
-    async def handle_bot_stopped_speaking(self):
-        """Notify that the bot stopped speaking."""
-        await self._conversation.handle_bot_stopped_speaking()
-
-    async def handle_bot_transcription(self, text: str):
-        """Append bot transcription to the conversation.
-
-        Args:
-            text: Bot TTS text.
-        """
-        await self._conversation.handle_bot_transcription(text)
-
-
-class RightPanel(Static):
-    """Right panel with system info and audio levels."""
-
-    def __init__(self):
-        """Initialize widgets for system info and audio level meters."""
-        super().__init__()
-        self._system_info = SystemInfo()
-        self._system_status = SystemStatus()
-        self._user_audio_level = AudioLevel("User")
-        self._bot_audio_level = AudioLevel("Bot")
-        self._llm_service_info = LLMServiceInfo()
-        self._tts_service_info = TTSServiceInfo()
-
-    def compose(self) -> ComposeResult:
-        """Compose the system info and audio level widgets."""
-        with Vertical():
-            yield self._system_info
-            yield Rule()
-            yield self._system_status
-            yield Rule()
-            yield self._user_audio_level
-            yield Rule()
-            yield self._bot_audio_level
-            yield Rule()
-            yield Label("LLM usage")
-            yield self._llm_service_info
-            yield Rule()
-            yield Label("TTS usage")
-            yield self._tts_service_info
-
-    async def handle_system_info(self, info: Mapping[str, Any]):
-        """Update the system info panel.
-
-        Args:
-            info: Mapping of system information.
-        """
-        self._system_info.update_system_info(info)
-
-    async def handle_system_status(self, status: str):
-        """Update the system status panel.
-
-        Args:
-            status: Current status.
-        """
-        self._system_status.update_status(status)
-
-    async def handle_user_audio_level(self, level: float):
-        """Update the user audio level meter.
-
-        Args:
-            level: Normalized audio level for the user.
-        """
-        self._user_audio_level.update_level(level)
-
-    async def handle_bot_audio_level(self, level: float):
-        """Update the bot audio level meter.
-
-        Args:
-            level: Normalized audio level for the bot.
-        """
-        self._bot_audio_level.update_level(level)
-
-    async def handle_services_info(self, info: Mapping[str, Any]):
-        """Update services info.
-
-        Args:
-            info: Services information (tokens, characters, ...).
-        """
-        if "tokens" in info:
-            self._llm_service_info.update_tokens(info["tokens"])
-        if "characters" in info:
-            self._tts_service_info.update_characters(info["characters"])
+TABS = ("conversation", "latency", "workers", "metrics", "logs")
+FLUSH_INTERVAL_SECS = 0.05
 
 
 class TailApp(App):
-    """Main Textual application orchestrating the UI and message handling."""
+    """Main Textual application."""
 
     CSS_PATH = "tail.tcss"
+    TITLE = "Tail"
+    SUB_TITLE = "A terminal dashboard for Pipecat"
 
     BINDINGS = [
-        ("c", "connect", "Connect"),
-        ("q", "quit", "Exit"),
+        Binding("1", "show_tab('conversation')", "Conversation"),
+        Binding("2", "show_tab('latency')", "Latency"),
+        Binding("3", "show_tab('workers')", "Workers"),
+        Binding("4", "show_tab('metrics')", "Metrics"),
+        Binding("5", "show_tab('logs')", "Logs"),
+        Binding("f", "follow", "Follow"),
+        Binding("slash", "search", "Search", key_display="/"),
+        Binding("l", "level", "Level"),
+        Binding("b", "bus_filter", "Bus filter"),
+        Binding("e", "next_error", "Error"),
+        Binding("x", "dismiss_error", "Dismiss", show=False),
+        Binding("w", "next_worker", "Worker"),
+        Binding("s", "save", "Save"),
+        Binding("c", "connect", "Connect"),
+        Binding("q", "quit", "Quit"),
     ]
 
     def __init__(
         self,
         *,
-        on_mount: Optional[Callable[[], Awaitable[None]]] = None,
-        on_shutdown: Optional[Callable[[], Awaitable[None]]] = None,
-        action_connect: Optional[Callable[[], Awaitable[None]]] = None,
+        on_mount: Optional[Hook] = None,
+        on_shutdown: Optional[Hook] = None,
+        action_connect: Optional[Hook] = None,
+        save_path: Optional[str] = None,
     ):
-        """Initialize the Tail Textual app.
+        """Initialize the app.
 
         Args:
-            on_mount: Optional hook called when the UI mounts.
-            on_shutdown: Optional hook called before quitting.
-            action_connect: Optional hook called to start a connection.
+            on_mount: Called when the UI has mounted.
+            on_shutdown: Called before the app quits.
+            action_connect: Called when the user asks to (re)connect.
+            save_path: Session file to record to from the start.
         """
         super().__init__()
         self._on_mount = on_mount
         self._on_shutdown = on_shutdown
         self._action_connect = action_connect
+        self._save_path = save_path
 
-        self._left_panel = LeftPanel()
-        self._middle_panel = MiddlePanel()
-        self._right_panel = RightPanel()
+        self.state = SessionState()
+        self._writer: Optional[SessionWriter] = None
+        self._dirty: set[str] = set()
+        self._workers_dirty_full = False
+        self._new_bus: list = []
+        self._new_logs: list = []
+        self._error_cursor = 0
 
-    async def on_mount(self):
-        """Set up theme, titles, and invoke optional mount hook."""
+        self.strip = TopStrip()
+        self.banner = ErrorBanner()
+        self.conversation_view = ConversationView()
+        self.latency_view = LatencyView()
+        self.workers_view = WorkersView()
+        self.metrics_view = MetricsView()
+        self.logs_view = LogsView()
+
+    #
+    # Layout and lifecycle
+    #
+
+    def compose(self) -> ComposeResult:
+        """Compose the header, strip, banner, tabs and footer."""
+        yield Header(show_clock=True)
+        yield self.banner
+        yield self.strip
+        with TabbedContent(initial="conversation", id="tabs"):
+            with TabPane("1 Conversation", id="conversation"):
+                yield self.conversation_view
+            with TabPane("2 Latency", id="latency"):
+                yield self.latency_view
+            with TabPane("3 Workers", id="workers"):
+                yield self.workers_view
+            with TabPane("4 Metrics", id="metrics"):
+                yield self.metrics_view
+            with TabPane("5 Logs", id="logs"):
+                yield self.logs_view
+        yield Footer()
+
+    async def on_mount(self) -> None:
+        """Apply the theme, bind widgets to the state and start flushing."""
         self.theme = "nord"
-        self.title = "Tail"
-        self.sub_title = "A terminal dashboard for Pipecat"
+        self.logs_view.bind_state(self.state)
+        self._bind_session()
+        self.strip.update_from(self.state)
+        self.set_interval(FLUSH_INTERVAL_SECS, self._flush_dirty)
+        if self._save_path:
+            self._start_saving(self._save_path)
         if self._on_mount:
             await self._on_mount()
 
-    async def action_connect(self):
-        """Action to invoke the optional connect hook."""
+    async def action_quit(self) -> None:
+        """Run the shutdown hook, close the session file and quit."""
+        if self._on_shutdown:
+            await self._on_shutdown()
+        if self._writer:
+            self._writer.close()
+            self._writer = None
+        await super().action_quit()
+
+    def _bind_session(self) -> None:
+        session = self.state.selected
+        self.conversation_view.sync(session)
+        self.latency_view.set_session(session)
+        self.metrics_view.set_session(session)
+
+    #
+    # Messages
+    #
+
+    async def handle_message(self, message: dict[str, Any]) -> None:
+        """Fold one wire message into the state and schedule a refresh.
+
+        Args:
+            message: A decoded wire message.
+        """
+        if self._writer:
+            self._writer.write(message)
+        before_bus = len(self.state.bus)
+        before_logs = len(self.state.logs)
+        before_workers = set(self.state.sessions)
+        areas = self.state.apply(message)
+        if not areas:
+            return
+        if BUS in areas and len(self.state.bus) > before_bus:
+            self._new_bus.append(self.state.bus[-1])
+        if LOGS in areas and len(self.state.logs) > before_logs:
+            self._new_logs.append(self.state.logs[-1])
+        if set(self.state.sessions) != before_workers:
+            areas.add(WORKERS)
+            areas.add(STRIP)
+            if len(before_workers) == 0 or self.state.selected_worker not in before_workers:
+                self._bind_session()
+        self._dirty |= areas
+
+    async def handle_status(self, status: str, detail: Optional[str] = None) -> None:
+        """Update the connection status shown in the strip.
+
+        Args:
+            status: ``connecting``, ``connected``, ``disconnected`` or ``error``.
+            detail: Optional detail, for example the error text.
+        """
+        self._dirty |= self.state.set_status(status, detail)
+
+    def _flush_dirty(self) -> None:
+        if not self._dirty:
+            return
+        dirty, self._dirty = self._dirty, set()
+        session = self.state.selected
+        if STRIP in dirty or STATUS in dirty:
+            self.strip.update_from(self.state)
+        if ERRORS in dirty:
+            self.banner.update_from(self.state)
+        if CONVERSATION in dirty:
+            self.conversation_view.sync(session)
+        if LATENCY in dirty:
+            self.latency_view.refresh_view()
+        if METRICS in dirty:
+            self.metrics_view.refresh_view()
+        if STARTUP in dirty:
+            self.metrics_view.refresh_startup()
+        if WORKERS in dirty or STATUS in dirty:
+            self.workers_view.worker_tree.sync(self.state)
+        if JOBS in dirty:
+            self.workers_view.jobs.sync(self.state)
+        if BUS in dirty:
+            for record in self._new_bus:
+                self.workers_view.bus.append(record)
+            self._new_bus.clear()
+        if LOGS in dirty:
+            for record in self._new_logs:
+                self.logs_view.append(record)
+            self._new_logs.clear()
+        if LOGS in dirty or ERRORS in dirty:
+            self.logs_view.refresh_pinned()
+
+    #
+    # Actions
+    #
+
+    def action_show_tab(self, tab: str) -> None:
+        """Switch to a tab by id."""
+        self.query_one("#tabs", TabbedContent).active = tab
+
+    @property
+    def active_tab(self) -> str:
+        """Id of the active tab."""
+        return self.query_one("#tabs", TabbedContent).active
+
+    def action_follow(self) -> None:
+        """Toggle auto-scroll on the conversation or the logs."""
+        if self.active_tab == "logs":
+            following = self.logs_view.toggle_follow()
+        else:
+            following = self.conversation_view.toggle_follow()
+        self.notify("Following" if following else "Paused", timeout=1.5)
+
+    def action_search(self) -> None:
+        """Open the log search box."""
+        self.action_show_tab("logs")
+        self.logs_view.open_search()
+
+    def action_level(self) -> None:
+        """Cycle the minimum log level."""
+        self.action_show_tab("logs")
+        level = self.logs_view.cycle_level()
+        self.notify(f"Log level {level}", timeout=1.5)
+
+    def action_bus_filter(self) -> None:
+        """Cycle the bus feed filter."""
+        self.action_show_tab("workers")
+        name = self.workers_view.bus.cycle_filter(self.state)
+        self.notify(f"Bus filter: {name}", timeout=1.5)
+
+    def action_next_error(self) -> None:
+        """Jump to the logs and show the next error."""
+        errors = self.state.errors
+        if not errors:
+            self.notify("No errors", timeout=1.5)
+            return
+        self._error_cursor = (self._error_cursor + 1) % len(errors)
+        error = errors[self._error_cursor]
+        self.action_show_tab("logs")
+        self.logs_view.refresh_pinned()
+        self.notify(
+            f"{error.processor}: {error.message}",
+            title=f"Error {self._error_cursor + 1} of {len(errors)} · {error.category}",
+            severity="error",
+            timeout=6,
+        )
+
+    def action_dismiss_error(self) -> None:
+        """Hide the error banner."""
+        self.state.dismiss_errors()
+        self.banner.update_from(self.state)
+
+    def action_next_worker(self) -> None:
+        """Scope the views to the next pipeline worker."""
+        name = self.state.select_next_worker()
+        if name is None:
+            self.notify("No pipeline workers yet", timeout=1.5)
+            return
+        self._bind_session()
+        self._dirty |= {STRIP, WORKERS, LATENCY, METRICS, STARTUP, CONVERSATION}
+        self.notify(f"Worker {name}", timeout=1.5)
+
+    def action_save(self) -> None:
+        """Start or stop recording the session to a file."""
+        if self._writer:
+            path = self._writer.path
+            count = self._writer.count
+            self._writer.close()
+            self._writer = None
+            self.notify(f"Saved {count} messages to {path}", timeout=4)
+            return
+        import datetime
+
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        self._start_saving(f"tail-session-{stamp}.jsonl")
+
+    def _start_saving(self, path: str) -> None:
+        try:
+            self._writer = SessionWriter(path)
+        except OSError as e:
+            self.notify(f"Unable to write {path}: {e}", severity="error")
+            return
+        self.notify(f"Recording to {path} (s to stop)", timeout=4)
+
+    async def action_connect(self) -> None:
+        """Ask the host to (re)connect."""
         if self._action_connect:
             await self._action_connect()
 
-    async def action_quit(self):
-        """Action to cleanly shutdown and then quit the app."""
-        if self._on_shutdown:
-            await self._on_shutdown()
-        await super().action_quit()
-
-    def compose(self) -> ComposeResult:
-        """Compose the app layout with header, three panels, and footer."""
-        # Header
-        yield Header(show_clock=True)
-        # Main horizontal panels
-        with Horizontal():
-            yield self._left_panel
-            yield self._middle_panel
-            yield self._right_panel
-        # Footer
-        yield Footer()
-
-    async def clear(self):
-        """Clear system status, audio levels and other UI elements."""
-        await self._right_panel.handle_user_audio_level(0)
-        await self._right_panel.handle_bot_audio_level(0)
-        await self._right_panel.handle_system_status("DISCONNECTED")
-
-    async def handle_message(self, message: Dict[str, Any]):
-        """Validate and dispatch incoming messages to handlers.
-
-        Args:
-            message: Raw message dictionary, expected to follow RTVI schema.
-        """
-        try:
-            if message.get("label") != RTVI_MESSAGE_LABEL:
-                logger.warning(f"Ignoring non-RTVI message: {message}")
-                return
-            await self._handle_message(message)
-        except ValidationError as e:
-            logger.warning(f"Invalid RTVI message (error: {e}): {message}")
-
-    async def _handle_message(self, message: Dict[str, Any]):
-        """Route a parsed RTVI message to the appropriate handler.
-
-        Args:
-            message: Message with a ``type`` field and associated data.
-        """
-        msg_type = message.get("type")
-        if not msg_type:
-            logger.warning(f"Ignoring non-RTVI message: {message}")
-            return
-        match msg_type:
-            case "tail-ready":
-                rtvi_message = RTVITailReadyMessage.model_validate(message)
-                await self.handle_tail_ready(rtvi_message.data)
-            case "tail-pipeline-finished":
-                await self.handle_tail_pipeline_finished()
-            case "user-started-speaking":
-                await self.handle_user_started_speaking()
-            case "user-stopped-speaking":
-                await self.handle_user_stopped_speaking()
-            case "user-audio-level":
-                rtvi_message = RTVIUserAudioLevelMessage.model_validate(message)
-                await self.handle_user_audio_level(rtvi_message.data.value)
-            case "user-transcription":
-                rtvi_message = RTVIUserTranscriptionMessage.model_validate(message)
-                if rtvi_message.data.final:
-                    await self.handle_user_transcription(rtvi_message.data.text)
-            case "bot-started-speaking":
-                await self.handle_bot_started_speaking()
-            case "bot-stopped-speaking":
-                await self.handle_bot_stopped_speaking()
-            case "bot-audio-level":
-                rtvi_message = RTVIBotAudioLevelMessage.model_validate(message)
-                await self.handle_bot_audio_level(rtvi_message.data.value)
-            case "bot-tts-text":
-                rtvi_message = RTVIBotTTSTextMessage.model_validate(message)
-                await self.handle_bot_transcription(rtvi_message.data.text)
-            case "metrics":
-                rtvi_message = RTVIMetricsMessage.model_validate(message)
-                await self.handle_metrics(rtvi_message.data)
-                await self.handle_services_info(rtvi_message.data)
-            case "system-log":
-                rtvi_message = RTVISystemLogMessage.model_validate(message)
-                await self.handle_system_log(rtvi_message.data.text)
-
-    async def handle_tail_ready(self, info: Mapping[str, Any]):
-        """Handle initial tail-ready message by updating system info.
-
-        Args:
-            info: System information.
-        """
-        await self._right_panel.handle_system_info(info)
-        await self._right_panel.handle_system_status("CONNECTED")
-
-    async def handle_tail_pipeline_finished(self):
-        """Reset audio meters when the pipeline has finished."""
-        await self.clear()
-
-    async def handle_user_started_speaking(self):
-        """Notify conversation that the user started speaking."""
-        await self._middle_panel.handle_user_started_speaking()
-
-    async def handle_user_stopped_speaking(self):
-        """Notify conversation that the user stopped speaking."""
-        await self._middle_panel.handle_user_stopped_speaking()
-
-    async def handle_user_audio_level(self, level: float):
-        """Update the user audio level meter from message data.
-
-        Args:
-            level: User audio level.
-        """
-        await self._right_panel.handle_user_audio_level(level)
-
-    async def handle_user_transcription(self, text: str):
-        """Append the latest user transcription.
-
-        Args:
-            text: User transcription.
-        """
-        await self._middle_panel.handle_user_transcription(text + " ")
-
-    async def handle_bot_started_speaking(self):
-        """Notify conversation that the bot started speaking."""
-        await self._middle_panel.handle_bot_started_speaking()
-
-    async def handle_bot_stopped_speaking(self):
-        """Notify conversation that the bot stopped speaking."""
-        await self._middle_panel.handle_bot_stopped_speaking()
-        await self._right_panel.handle_bot_audio_level(0)
-
-    async def handle_bot_audio_level(self, level: float):
-        """Update the bot audio level meter from message data.
-
-        Args:
-            level: Bot audio level.
-        """
-        await self._right_panel.handle_bot_audio_level(level)
-
-    async def handle_bot_transcription(self, text: str):
-        """Append the latest bot TTS text.
-
-        Args:
-            text: Bot transcription.
-        """
-        await self._middle_panel.handle_bot_transcription(text + " ")
-
-    async def handle_metrics(self, metrics: Mapping[str, Any]):
-        """Handle metrics payloads and update the services metrics panel.
-
-        Args:
-            metrics: RTVI metrics.
-        """
-        if not "ttfb" in metrics:
-            return
-
-        for metrics in metrics["ttfb"]:
-            await self._left_panel.handle_metrics_ttfb_data(metrics)
-
-    async def handle_system_log(self, text: str):
-        """Append system log messages.
-
-        Args:
-            text: System log message.
-        """
-        await self._middle_panel.append_log(text)
-
-    async def handle_system_status(self, status: str):
-        """Update system status.
-
-        Args:
-            status: System status.
-        """
-        await self._right_panel.handle_system_status(status)
-
-    async def handle_services_info(self, info: Mapping[str, Any]):
-        """Handle metrics payloads and updates services info.
-
-        Args:
-            info: Services info (usage tokens, etc.).
-        """
-        await self._right_panel.handle_services_info(info)
+    def on_key(self, event: events.Key) -> None:
+        """Close the log search on Escape."""
+        if event.key == "escape" and self.logs_view.search.has_focus:
+            self.logs_view.close_search()
+            event.stop()

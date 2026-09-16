@@ -28,12 +28,7 @@ import time
 from typing import Any, Optional
 
 from loguru import logger
-from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
-    MetricsFrame,
-    StartFrame,
-)
+from pipecat.frames.frames import MetricsFrame, StartFrame
 from pipecat.metrics.metrics import ProcessingMetricsData
 from pipecat.observers.base_observer import (
     BaseObserver,
@@ -144,6 +139,7 @@ class TailObserver(RTVIObserver):
         log_level: str = "DEBUG",
         **kwargs,
     ):
+        """Initialize the observer. See the class docstring for the arguments."""
         super().__init__(params=params or default_rtvi_params(), **kwargs)
 
         self._worker = worker
@@ -229,8 +225,13 @@ class TailObserver(RTVIObserver):
         if self._logger_id is not None:
             logger.remove(self._logger_id)
             self._logger_id = None
+        # Child cleanup waits for their pending event handlers, so everything
+        # they reported is delivered before the pipeline is declared finished.
         for child in self._children:
             await child.cleanup()
+        if not self._pipeline_finished:
+            self._pipeline_finished = True
+            await self.send_tail_message(TailPipelineFinishedMessage())
         if self._server:
             await self._server.stop()
         await super().cleanup()
@@ -261,9 +262,6 @@ class TailObserver(RTVIObserver):
                 self._metrics_seen.clear()
             self._metrics_seen.add(frame.id)
             await self._handle_processing_metrics(frame)
-        elif isinstance(frame, (EndFrame, CancelFrame)) and not self._pipeline_finished:
-            self._pipeline_finished = True
-            await self.send_tail_message(TailPipelineFinishedMessage())
 
     async def on_processor_setup(self, data: ProcessorSetUp):
         """Forward the hook to child observers."""

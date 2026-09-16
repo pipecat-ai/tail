@@ -1,56 +1,163 @@
-LeftPanel {
-    border: $primary;
-    width: 20%;
+Screen {
+    layout: vertical;
 }
 
-MiddlePanel {
-    width: 60%;
+#banner {
+    height: 1;
+    padding: 0 1;
+    background: $error 30%;
+    color: $text;
 }
 
-RightPanel {
-    border: $primary;
-    padding: 1;
-    width: 20%;
+#strip {
+    height: 1;
+    padding: 0 1;
+    background: $surface;
+    color: $text;
 }
 
-Conversation {
-    border: $primary;
-    height: 60%;
+#tabs {
+    height: 1fr;
 }
 
-SystemLogs {
-    border: $primary;
-    height: 40%;
+TabPane {
+    padding: 0 1;
 }
 
-SystemInfo {
-    border: $primary;
+/* Conversation */
+
+#conversation-view {
+    height: 1fr;
+    border: round $primary;
+    border-title-color: $secondary;
+    padding: 0 1;
 }
 
-LLMServiceInfo {
-    border: $primary;
+#conversation-view .turn {
+    margin-bottom: 1;
 }
 
-TTSServiceInfo {
-    border: $primary;
+#conversation-view .legend {
+    color: $text-muted;
+    margin-top: 1;
 }
 
-ServiceMetrics {
-    height: 30%;
+/* Latency */
+
+#latency-view {
+    height: 1fr;
 }
 
-AudioLevel {
-    height: 5%;
+#latency-bars {
+    height: 2fr;
+    border: round $primary;
+    border-title-color: $secondary;
+    border-subtitle-color: $text-muted;
+    padding: 0 1;
+    overflow-y: auto;
 }
 
-ConnectedStatus {
-    color: $text-success;
+#speaking-timeline {
+    height: 8;
+    border: round $primary;
+    border-title-color: $secondary;
+    border-subtitle-color: $text-muted;
+    padding: 0 1;
 }
 
-DisconnectedStatus {
-    color: $text-primary;
+/* Workers */
+
+#workers-view {
+    height: 1fr;
 }
 
-ErrorStatus {
-    color: $text-error;
+#workers-top {
+    height: 2fr;
+}
+
+#worker-tree {
+    width: 2fr;
+    border: round $primary;
+    border-title-color: $secondary;
+    padding: 0 1;
+}
+
+#jobs-table {
+    width: 3fr;
+    border: round $primary;
+    border-title-color: $secondary;
+}
+
+#bus-feed {
+    height: 3fr;
+    border: round $primary;
+    border-title-color: $secondary;
+    border-subtitle-color: $text-muted;
+    padding: 0 1;
+}
+
+/* Metrics */
+
+#metrics-view {
+    height: 1fr;
+}
+
+#metrics-top {
+    height: 2fr;
+}
+
+#latency-chart {
+    width: 3fr;
+    border: round $primary;
+    border-title-color: $secondary;
+}
+
+#series {
+    width: 1fr;
+    border: round $primary;
+    border-title-color: $secondary;
+}
+
+#summary-table {
+    height: 1fr;
+    border: round $primary;
+    border-title-color: $secondary;
+}
+
+#startup {
+    height: auto;
+    max-height: 40%;
+    border: round $primary;
+    border-title-color: $secondary;
+    border-subtitle-color: $text-muted;
+    padding: 0 1;
+    overflow-y: auto;
+}
+
+/* Logs */
+
+#logs-view {
+    height: 1fr;
+}
+
+#log-toolbar {
+    height: auto;
+}
+
+#log-search {
+    width: 1fr;
+}
+
+#log-lines {
+    height: 1fr;
+    border: round $primary;
+    border-title-color: $secondary;
+    border-subtitle-color: $text-muted;
+    padding: 0 1;
+}
+
+#log-pinned {
+    height: 1;
+    padding: 0 1;
+    background: $surface;
 }

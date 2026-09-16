@@ -110,6 +110,7 @@ class TailRunner(WorkerRunner):
         handle_sigterm: bool = False,
         **kwargs,
     ):
+        """Initialize the runner. See the class docstring for the arguments."""
         super().__init__(
             name=name, handle_sigint=handle_sigint, handle_sigterm=handle_sigterm, **kwargs
         )
