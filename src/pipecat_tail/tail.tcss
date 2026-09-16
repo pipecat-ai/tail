@@ -75,7 +75,7 @@ TabPane {
 }
 
 #latency-stats {
-    width: 44;
+    width: 1fr;
     height: 100%;
     border: round $primary;
     border-title-color: $secondary;
