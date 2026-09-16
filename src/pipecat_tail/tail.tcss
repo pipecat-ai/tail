@@ -45,12 +45,19 @@ TabPane {
 }
 
 #latency-bars {
-    height: 2fr;
+    height: 1fr;
     border: round $primary;
     border-title-color: $secondary;
     border-subtitle-color: $text-muted;
     padding: 0 1;
-    overflow-y: auto;
+}
+
+#latency-legend {
+    height: auto;
+    max-height: 12;
+    border: round $primary;
+    border-title-color: $secondary;
+    padding: 0 1;
 }
 
 #speaking-timeline {
@@ -113,6 +120,7 @@ TabPane {
 
 #series {
     width: 1fr;
+    height: 100%;
     border: round $primary;
     border-title-color: $secondary;
 }

@@ -11,7 +11,7 @@ from typing import Optional
 
 from rich.style import Style
 from rich.text import Text
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static
 
 from pipecat_tail.state import LatencyRecord, WorkerSession, percentile
@@ -33,8 +33,7 @@ from pipecat_tail.widgets.render import (
     stacked_bar,
 )
 
-MAX_ROWS = 40
-MIN_ROWS = 3
+MAX_ROWS = 500
 TIMELINE_SECS = 30.0
 
 # The order the waits happen in a turn, for the legend.
@@ -55,15 +54,48 @@ CONTRIBUTION_ORDER = [
 ]
 
 
-class LatencyBars(Static):
-    """Stacked bar per turn, with percentiles and a legend."""
+def _scale_for(records: list[LatencyRecord]) -> float:
+    """Seconds that fill a full bar: the longest turn rounded up to a friendly step."""
+    longest = max([(r.total_secs or r.latency_secs) for r in records] + [0.5])
+    step = 0.5
+    while step < longest:
+        step *= 2
+    return step
+
+
+def _bar_width(widget_width: int) -> int:
+    width = max(widget_width - 2, 40)
+    return max(width - 26, 20)
+
+
+def _ruler(scale: float, bar_width: int) -> Text:
+    text = Text("turn   ", style=STYLE_LABEL)
+    ruler = Text()
+    for tick in range(0, 5):
+        secs = scale * tick / 4
+        label = f"{secs:g}s"
+        position = int(bar_width * tick / 4)
+        while len(ruler) < position:
+            ruler.append(" ")
+        ruler.append(label, style=STYLE_LABEL)
+    text.append_text(ruler)
+    return text
+
+
+class LatencyBars(VerticalScroll):
+    """Stacked bar per turn, scrollable, following the newest turn."""
 
     def __init__(self):
         """Create the widget."""
-        super().__init__(Text(""), id="latency-bars")
+        super().__init__(id="latency-bars")
         self.border_title = "Per-turn latency"
         self.border_subtitle = "user stops speaking → bot starts speaking"
         self._session: Optional[WorkerSession] = None
+        self._body = Static(Text(""))
+
+    def compose(self):
+        """Compose the body."""
+        yield self._body
 
     def set_session(self, session: WorkerSession) -> None:
         """Point the widget at a session and re-render."""
@@ -75,8 +107,9 @@ class LatencyBars(Static):
         self.refresh_view()
 
     def refresh_view(self) -> None:
-        """Re-render from the session."""
-        self.update(self._build())
+        """Re-render from the session and keep the newest turn in view."""
+        self._body.update(self._build())
+        self.call_after_refresh(self.scroll_end, animate=False)
 
     def _build(self) -> Text:
         text = Text()
@@ -90,34 +123,9 @@ class LatencyBars(Static):
             )
             return text
 
-        # The legend lists every kind of wait seen so far. Fit as many recent
-        # turns as the panel has room for above it, so it never scrolls away.
-        seen = self._contributions_seen(session.latencies)
-        fixed_lines = 1 + 1 + 1 + 1 + max(len(seen), 1) + 1  # ruler, stats, legend, blanks
-        available = self.size.height - 2 - fixed_lines
-        rows = max(MIN_ROWS, min(MAX_ROWS, available))
-        records = session.latencies[-rows:]
-        width = max(self.size.width - 2, 40)
-        bar_width = max(width - 26, 20)
-        scale = max((r.total_secs or r.latency_secs) for r in records)
-        scale = max(scale, 0.5)
-        # Round the scale up to a friendly number of seconds.
-        step = 0.5
-        while step < scale:
-            step *= 2
-        scale = step
-
-        text.append("turn   ", style=STYLE_LABEL)
-        ruler = Text()
-        for tick in range(0, 5):
-            secs = scale * tick / 4
-            label = f"{secs:g}s"
-            position = int(bar_width * tick / 4)
-            while len(ruler) < position:
-                ruler.append(" ")
-            ruler.append(label, style=STYLE_LABEL)
-        text.append_text(ruler)
-        text.append("\n")
+        records = session.latencies[-MAX_ROWS:]
+        bar_width = _bar_width(self.size.width)
+        scale = _scale_for(records)
 
         worst = max(records, key=lambda r: r.latency_secs)
         for record in records:
@@ -139,28 +147,65 @@ class LatencyBars(Static):
                 text.append("  greeting", style=STYLE_DIM)
             text.append("\n")
 
+        text.rstrip()
+        return text
+
+
+class LatencyLegend(Static):
+    """Percentiles and the color key for the bars, always in view."""
+
+    def __init__(self):
+        """Create the widget."""
+        super().__init__(Text(""), id="latency-legend")
+        self.border_title = "Legend"
+        self._session: Optional[WorkerSession] = None
+
+    def set_session(self, session: WorkerSession) -> None:
+        """Point the widget at a session and re-render."""
+        self._session = session
+        self.refresh_view()
+
+    def on_resize(self) -> None:
+        """Re-render when the width changes."""
+        self.refresh_view()
+
+    def refresh_view(self) -> None:
+        """Re-render from the session."""
+        self.update(self._build())
+
+    def _build(self) -> Text:
+        text = Text()
+        session = self._session
+        if session is None or not session.latencies:
+            text.append(
+                "Latency is measured from the user going silent to the bot starting to speak. "
+                "The breakdown per service needs enable_metrics=True in PipelineParams.",
+                style=STYLE_DIM,
+            )
+            return text
+        records = session.latencies
+        text.append_text(_ruler(_scale_for(records[-MAX_ROWS:]), _bar_width(self.size.width)))
         text.append("\n")
-        values = [r.latency_secs for r in session.latencies if not r.first_bot_speech]
+        values = [r.latency_secs for r in records if not r.first_bot_speech]
         if not values:
-            values = [r.latency_secs for r in session.latencies]
-        p50 = percentile(values, 0.5)
-        p95 = percentile(values, 0.95)
+            values = [r.latency_secs for r in records]
+        worst = max(records, key=lambda r: r.latency_secs)
         text.append("p50 ", style=STYLE_LABEL)
-        text.append(fmt_secs_fixed(p50), style=STYLE_BRIGHT)
+        text.append(fmt_secs_fixed(percentile(values, 0.5)), style=STYLE_BRIGHT)
         text.append("   p95 ", style=STYLE_LABEL)
-        text.append(fmt_secs_fixed(p95), style=STYLE_BRIGHT)
+        text.append(fmt_secs_fixed(percentile(values, 0.95)), style=STYLE_BRIGHT)
         text.append("   worst ", style=STYLE_LABEL)
         text.append(f"turn {worst.turn}" if worst.turn is not None else "?", style=STYLE_TEXT)
         biggest = _biggest_contribution(worst)
         if biggest:
             text.append(f" ({biggest})", style=STYLE_DIM)
-        share = _llm_share(session.latencies)
+        share = _llm_share(records)
         if share is not None:
             text.append("   llm share ", style=STYLE_LABEL)
             text.append(f"{share:.0%}", style=STYLE_TEXT)
-        text.append(f"   turns {len(session.latencies)}", style=STYLE_DIM)
-        text.append("\n\n")
-        text.append_text(self._legend(seen))
+        text.append(f"   turns {len(records)}", style=STYLE_DIM)
+        text.append("\n")
+        text.append_text(self._legend(self._contributions_seen(records)))
         return text
 
     @staticmethod
@@ -185,7 +230,6 @@ class LatencyBars(Static):
                 "  enable_metrics is off, so there is no breakdown per service", style=STYLE_DIM
             )
             return text
-        text.append("what each color is, in the order it happens in a turn\n", style=STYLE_LABEL)
         width = max(len(label) for label, _ in seen.values())
 
         def order(item):
@@ -391,19 +435,23 @@ class LatencyView(Vertical):
         """Create the tab."""
         super().__init__(id="latency-view")
         self.bars = LatencyBars()
+        self.legend = LatencyLegend()
         self.timeline = SpeakingTimeline()
 
     def compose(self):
-        """Compose the bars and the timeline."""
+        """Compose the bars, the legend and the timeline."""
         yield self.bars
+        yield self.legend
         yield self.timeline
 
     def set_session(self, session: WorkerSession) -> None:
-        """Scope both panels to a session."""
+        """Scope every panel to a session."""
         self.bars.set_session(session)
+        self.legend.set_session(session)
         self.timeline.set_session(session)
 
     def refresh_view(self) -> None:
-        """Re-render both panels."""
+        """Re-render every panel."""
         self.bars.refresh_view()
+        self.legend.refresh_view()
         self.timeline.refresh_view()
