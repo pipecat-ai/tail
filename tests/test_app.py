@@ -38,7 +38,7 @@ async def test_tabs_render_the_session():
         await pilot.press("2")
         assert app.query_one("#tabs", TabbedContent).active == "latency"
         assert "greeting" in str(app.latency_view.bars._body.content)
-        assert "p50" in str(app.latency_view.legend.content)
+        assert "p50" in str(app.latency_view.stats.content)
 
         await pilot.press("3")
         tree = app.workers_view.worker_tree

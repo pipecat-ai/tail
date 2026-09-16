@@ -11,7 +11,7 @@ from typing import Optional
 
 from rich.style import Style
 from rich.text import Text
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Static
 
 from pipecat_tail.state import LatencyRecord, WorkerSession, percentile
@@ -165,8 +165,68 @@ class LatencyBars(Vertical):
         return text
 
 
+class LatencyStats(Static):
+    """Percentiles and the worst turn, one figure per line."""
+
+    def __init__(self):
+        """Create the widget."""
+        super().__init__(Text(""), id="latency-stats")
+        self.border_title = "Summary"
+        self._session: Optional[WorkerSession] = None
+
+    def set_session(self, session: WorkerSession) -> None:
+        """Point the widget at a session and re-render."""
+        self._session = session
+        self.refresh_view()
+
+    def refresh_view(self) -> None:
+        """Re-render from the session."""
+        self.update(self._build())
+
+    def _build(self) -> Text:
+        text = Text()
+        session = self._session
+        if session is None or not session.latencies:
+            text.append("No turns measured yet.", style=STYLE_DIM)
+            return text
+        records = session.latencies
+        values = [r.latency_secs for r in records if not r.first_bot_speech]
+        if not values:
+            values = [r.latency_secs for r in records]
+        worst = max(records, key=lambda r: r.latency_secs)
+        greeting = next((r for r in records if r.first_bot_speech), None)
+
+        def row(label: str, value: str, detail: str = "", style=STYLE_BRIGHT) -> None:
+            text.append(f"{label:<10}", style=STYLE_LABEL)
+            text.append(value, style=style)
+            if detail:
+                text.append(f"  {detail}", style=STYLE_DIM)
+            text.append("\n")
+
+        row("p50", fmt_secs_fixed(percentile(values, 0.5)))
+        row("p95", fmt_secs_fixed(percentile(values, 0.95)))
+        row("max", fmt_secs_fixed(max(values)))
+        row("min", fmt_secs_fixed(min(values)))
+        worst_turn = f"turn {worst.turn}" if worst.turn is not None else "?"
+        biggest = _biggest_contribution(worst)
+        row("worst", worst_turn, biggest or "", style=STYLE_WARN)
+        share = _llm_share(records)
+        if share is not None:
+            row("llm share", f"{share:.0%}", "of the measured waits", style=STYLE_TEXT)
+        if greeting is not None:
+            row(
+                "greeting",
+                fmt_secs_fixed(greeting.latency_secs),
+                "client connect → bot",
+                style=STYLE_TEXT,
+            )
+        row("turns", str(len(values)), "measured", style=STYLE_TEXT)
+        text.rstrip()
+        return text
+
+
 class LatencyLegend(Static):
-    """Percentiles and the color key for the bars, always in view."""
+    """The color key for the bars, always in view."""
 
     def __init__(self):
         """Create the widget."""
@@ -198,25 +258,6 @@ class LatencyLegend(Static):
             )
             return text
         records = session.latencies
-        values = [r.latency_secs for r in records if not r.first_bot_speech]
-        if not values:
-            values = [r.latency_secs for r in records]
-        worst = max(records, key=lambda r: r.latency_secs)
-        text.append("p50 ", style=STYLE_LABEL)
-        text.append(fmt_secs_fixed(percentile(values, 0.5)), style=STYLE_BRIGHT)
-        text.append("   p95 ", style=STYLE_LABEL)
-        text.append(fmt_secs_fixed(percentile(values, 0.95)), style=STYLE_BRIGHT)
-        text.append("   worst ", style=STYLE_LABEL)
-        text.append(f"turn {worst.turn}" if worst.turn is not None else "?", style=STYLE_TEXT)
-        biggest = _biggest_contribution(worst)
-        if biggest:
-            text.append(f" ({biggest})", style=STYLE_DIM)
-        share = _llm_share(records)
-        if share is not None:
-            text.append("   llm share ", style=STYLE_LABEL)
-            text.append(f"{share:.0%}", style=STYLE_TEXT)
-        text.append(f"   turns {len(records)}", style=STYLE_DIM)
-        text.append("\n")
         text.append_text(self._legend(self._contributions_seen(records)))
         return text
 
@@ -447,23 +488,28 @@ class LatencyView(Vertical):
         """Create the tab."""
         super().__init__(id="latency-view")
         self.bars = LatencyBars()
+        self.stats = LatencyStats()
         self.legend = LatencyLegend()
         self.timeline = SpeakingTimeline()
 
     def compose(self):
-        """Compose the bars, the legend and the timeline."""
+        """Compose the bars, then summary and legend side by side, then the timeline."""
         yield self.bars
-        yield self.legend
+        with Horizontal(id="latency-bottom"):
+            yield self.stats
+            yield self.legend
         yield self.timeline
 
     def set_session(self, session: WorkerSession) -> None:
         """Scope every panel to a session."""
         self.bars.set_session(session)
+        self.stats.set_session(session)
         self.legend.set_session(session)
         self.timeline.set_session(session)
 
     def refresh_view(self) -> None:
         """Re-render every panel."""
         self.bars.refresh_view()
+        self.stats.refresh_view()
         self.legend.refresh_view()
         self.timeline.refresh_view()

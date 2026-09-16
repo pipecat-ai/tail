@@ -70,9 +70,21 @@ TabPane {
     height: 1fr;
 }
 
+#latency-bottom {
+    height: 11;
+}
+
+#latency-stats {
+    width: 44;
+    height: 100%;
+    border: round $primary;
+    border-title-color: $secondary;
+    padding: 0 1;
+}
+
 #latency-legend {
-    height: auto;
-    max-height: 12;
+    width: 1fr;
+    height: 100%;
     border: round $primary;
     border-title-color: $secondary;
     padding: 0 1;
