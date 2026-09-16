@@ -33,7 +33,8 @@ from pipecat_tail.widgets.render import (
     stacked_bar,
 )
 
-MAX_ROWS = 14
+MAX_ROWS = 40
+MIN_ROWS = 3
 TIMELINE_SECS = 30.0
 
 # The order the waits happen in a turn, for the legend.
@@ -89,7 +90,13 @@ class LatencyBars(Static):
             )
             return text
 
-        records = session.latencies[-MAX_ROWS:]
+        # The legend lists every kind of wait seen so far. Fit as many recent
+        # turns as the panel has room for above it, so it never scrolls away.
+        seen = self._contributions_seen(session.latencies)
+        fixed_lines = 1 + 1 + 1 + 1 + max(len(seen), 1) + 1  # ruler, stats, legend, blanks
+        available = self.size.height - 2 - fixed_lines
+        rows = max(MIN_ROWS, min(MAX_ROWS, available))
+        records = session.latencies[-rows:]
         width = max(self.size.width - 2, 40)
         bar_width = max(width - 26, 20)
         scale = max((r.total_secs or r.latency_secs) for r in records)
@@ -153,19 +160,23 @@ class LatencyBars(Static):
             text.append(f"{share:.0%}", style=STYLE_TEXT)
         text.append(f"   turns {len(session.latencies)}", style=STYLE_DIM)
         text.append("\n\n")
-        text.append_text(self._legend(records))
+        text.append_text(self._legend(seen))
         return text
 
     @staticmethod
-    def _legend(records: list[LatencyRecord]) -> Text:
-        # One line per kind of wait, in the order they appear in a turn, with
-        # the service or setting that owns it.
+    def _contributions_seen(records: list[LatencyRecord]) -> dict[str, tuple[str, str]]:
         seen: dict[str, tuple[str, str]] = {}
         for record in records:
             for c in record.contributions:
                 key = str(c.get("key", ""))
                 if key and key not in seen:
                     seen[key] = (str(c.get("label", key)), str(c.get("owner", "")))
+        return seen
+
+    @staticmethod
+    def _legend(seen: dict[str, tuple[str, str]]) -> Text:
+        # One line per kind of wait, in the order they happen in a turn, with
+        # the service or setting that owns it.
         text = Text()
         if not seen:
             text.append("■ ", style=Style(color=DIM))
