@@ -62,6 +62,14 @@ TabPane {
     padding: 0 1;
 }
 
+#latency-ruler {
+    height: 1;
+}
+
+#latency-scroll {
+    height: 1fr;
+}
+
 #latency-legend {
     height: auto;
     max-height: 12;

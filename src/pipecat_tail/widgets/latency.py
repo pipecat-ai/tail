@@ -82,8 +82,8 @@ def _ruler(scale: float, bar_width: int) -> Text:
     return text
 
 
-class LatencyBars(VerticalScroll):
-    """Stacked bar per turn, scrollable, following the newest turn."""
+class LatencyBars(Vertical):
+    """Stacked bar per turn under a fixed time scale, following the newest turn."""
 
     def __init__(self):
         """Create the widget."""
@@ -91,11 +91,15 @@ class LatencyBars(VerticalScroll):
         self.border_title = "Per-turn latency"
         self.border_subtitle = "user stops speaking → bot starts speaking"
         self._session: Optional[WorkerSession] = None
+        self._ruler = Static(Text(""), id="latency-ruler")
+        self._scroll = VerticalScroll(id="latency-scroll")
         self._body = Static(Text(""))
 
     def compose(self):
-        """Compose the body."""
-        yield self._body
+        """Compose the fixed scale and the scrolling bars."""
+        yield self._ruler
+        with self._scroll:
+            yield self._body
 
     def set_session(self, session: WorkerSession) -> None:
         """Point the widget at a session and re-render."""
@@ -108,8 +112,14 @@ class LatencyBars(VerticalScroll):
 
     def refresh_view(self) -> None:
         """Re-render from the session and keep the newest turn in view."""
+        session = self._session
+        if session is None or not session.latencies:
+            self._ruler.update(Text(""))
+        else:
+            records = session.latencies[-MAX_ROWS:]
+            self._ruler.update(_ruler(_scale_for(records), _bar_width(self.size.width)))
         self._body.update(self._build())
-        self.call_after_refresh(self.scroll_end, animate=False)
+        self.call_after_refresh(self._scroll.scroll_end, animate=False)
 
     def _build(self) -> Text:
         text = Text()
@@ -184,8 +194,6 @@ class LatencyLegend(Static):
             )
             return text
         records = session.latencies
-        text.append_text(_ruler(_scale_for(records[-MAX_ROWS:]), _bar_width(self.size.width)))
-        text.append("\n")
         values = [r.latency_secs for r in records if not r.first_bot_speech]
         if not values:
             values = [r.latency_secs for r in records]
