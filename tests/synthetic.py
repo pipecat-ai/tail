@@ -1087,6 +1087,13 @@ def build_messages(start: float | None = None) -> list[tuple[float, dict]]:
             {"kind": "ended", "turn": 3, "duration_secs": 7.3, "was_interrupted": False},
         ),
     )
+    # Levels keep flowing while the bot replies, as the input transport does.
+    for i in range(int((17.3 - 8.2) / 0.15)):
+        at(8.2 + i * 0.15, rtvi("user-audio-level", {"value": 0.03 + 0.02 * (i % 3)}))
+    for i in range(int((12.5 - 10.8) / 0.15)):
+        at(10.8 + i * 0.15, rtvi("bot-audio-level", {"value": 0.35 + 0.1 * (i % 4)}))
+    # Deliver in time order; the calls above are grouped by topic, not time.
+    out.sort(key=lambda entry: entry[0])
     return out
 
 

@@ -143,6 +143,7 @@ class TailApp(App):
         self._bind_session()
         self.strip.update_from(self.state)
         self.set_interval(FLUSH_INTERVAL_SECS, self._flush_dirty)
+        self.set_interval(0.2, self._decay_levels)
         if self._save_path:
             self._start_saving(self._save_path)
         if self._on_mount:
@@ -200,6 +201,10 @@ class TailApp(App):
             detail: Optional detail, for example the error text.
         """
         self._dirty |= self.state.set_status(status, detail)
+
+    def _decay_levels(self) -> None:
+        if self.state.decay_levels():
+            self._dirty.add(STRIP)
 
     def _flush_dirty(self) -> None:
         if not self._dirty:

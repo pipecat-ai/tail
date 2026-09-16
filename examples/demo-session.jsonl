@@ -5,8 +5,8 @@
 {"t":1789000000.2,"message":{"label":"tail","type":"tail-bus","timestamp":1789000000.2,"data":{"name":"BusJobRequestMessage#7","message_type":"BusJobRequestMessage","category":"job","source":"runner-1","target":"bot-1","payload":{"job_id":"a91f2c3d4e","job_name":"call"}}}}
 {"t":1789000000.5,"message":{"label":"tail","type":"tail-pipeline-started","timestamp":1789000000.5,"worker":"bot-1","data":{"processors":["DailyInputTransport#0","DeepgramSTTService#0","LLMUserAggregator#0","OpenAILLMService#0","CartesiaTTSService#0","DailyOutputTransport#0","LLMAssistantAggregator#0"]}}}
 {"t":1789000000.5,"message":{"label":"tail","type":"tail-startup","timestamp":1789000000.5,"worker":"bot-1","data":{"start_time":1789000000.0,"total_duration_secs":0.98,"setup_phase_secs":0.93,"start_phase_secs":0.05,"processor_timings":[{"processor_name":"DailyInputTransport#0","start_offset_secs":0.0,"duration_secs":0.42,"setup_duration_secs":0.412,"start_duration_secs":0.008},{"processor_name":"DeepgramSTTService#0","start_offset_secs":0.0,"duration_secs":0.209,"setup_duration_secs":0.188,"start_duration_secs":0.021},{"processor_name":"LLMUserAggregator#0","start_offset_secs":0.0,"duration_secs":0.004,"setup_duration_secs":0.003,"start_duration_secs":0.001},{"processor_name":"OpenAILLMService#0","start_offset_secs":0.0,"duration_secs":0.043,"setup_duration_secs":0.041,"start_duration_secs":0.002},{"processor_name":"CartesiaTTSService#0","start_offset_secs":0.0,"duration_secs":0.247,"setup_duration_secs":0.233,"start_duration_secs":0.014},{"processor_name":"DailyOutputTransport#0","start_offset_secs":0.0,"duration_secs":0.103,"setup_duration_secs":0.097,"start_duration_secs":0.006}]}}}
-{"t":1789000001.8,"message":{"label":"tail","type":"tail-transport-timing","timestamp":1789000001.8,"worker":"bot-1","data":{"start_time":1789000000.0,"bot_connected_secs":1.12,"client_connected_secs":1.84}}}
 {"t":1789000000.6,"message":{"label":"tail","type":"tail-log","timestamp":1789000000.6,"worker":"bot-1","data":{"time":"2026-09-16T09:40:12.981","level":"INFO","name":"pipecat.pipeline.worker","function":"_setup","line":1283,"message":"Pipeline ready"}}}
+{"t":1789000001.8,"message":{"label":"tail","type":"tail-transport-timing","timestamp":1789000001.8,"worker":"bot-1","data":{"start_time":1789000000.0,"bot_connected_secs":1.12,"client_connected_secs":1.84}}}
 {"t":1789000001.9,"message":{"label":"tail","type":"tail-worker-ready","timestamp":1789000001.9,"worker":"bot-1","data":{"runner":"runner-1","parent":null,"active":true,"bridged":false,"started_at":1789000000.0}}}
 {"t":1789000002.0,"message":{"label":"tail","type":"tail-turn","timestamp":1789000002.0,"worker":"bot-1","data":{"kind":"started","turn":1}}}
 {"t":1789000002.1,"message":{"label":"rtvi-ai","type":"bot-llm-started","worker":"bot-1"}}
@@ -30,12 +30,12 @@
 {"t":1789000003.2,"message":{"label":"tail","type":"tail-service-latency","timestamp":1789000003.2,"worker":"bot-1","data":{"kind":"ttfb","processor":"CartesiaTTSService#0","model":"sonic-2","timestamp":1789000003.2,"seconds":0.14}}}
 {"t":1789000003.2,"message":{"label":"tail","type":"tail-service-usage","timestamp":1789000003.2,"worker":"bot-1","data":{"kind":"llm","processor":"OpenAILLMService#0","model":"gpt-4o","timestamp":1789000003.2,"prompt_tokens":180,"completion_tokens":12,"total_tokens":192}}}
 {"t":1789000003.2,"message":{"label":"tail","type":"tail-service-usage","timestamp":1789000003.2,"worker":"bot-1","data":{"kind":"tts","processor":"CartesiaTTSService#0","model":"sonic-2","timestamp":1789000003.2,"characters":37}}}
-{"t":1789000003.3,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"Hi there!","aggregated_by":"sentence","segment_id":11,"will_be_spoken":true,"spoken_status":"completed","spoken_progress":{"accumulated_text":"Hi there!","remaining_text":""}}}}
-{"t":1789000003.8,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"I can tell you the weather.","aggregated_by":"sentence","segment_id":12,"will_be_spoken":true,"spoken_status":"completed","spoken_progress":{"accumulated_text":"I can tell you the weather.","remaining_text":""}}}}
 {"t":1789000003.2,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.3}}}
+{"t":1789000003.3,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"Hi there!","aggregated_by":"sentence","segment_id":11,"will_be_spoken":true,"spoken_status":"completed","spoken_progress":{"accumulated_text":"Hi there!","remaining_text":""}}}}
 {"t":1789000003.35,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.38}}}
 {"t":1789000003.5,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.45999999999999996}}}
 {"t":1789000003.65,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.54}}}
+{"t":1789000003.8,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"I can tell you the weather.","aggregated_by":"sentence","segment_id":12,"will_be_spoken":true,"spoken_status":"completed","spoken_progress":{"accumulated_text":"I can tell you the weather.","remaining_text":""}}}}
 {"t":1789000003.8,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.3}}}
 {"t":1789000003.95,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.38}}}
 {"t":1789000004.1,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.45999999999999996}}}
@@ -51,54 +51,72 @@
 {"t":1789000006.25,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.5}}}
 {"t":1789000006.4,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.6000000000000001}}}
 {"t":1789000006.55,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.7000000000000001}}}
+{"t":1789000006.6,"message":{"label":"rtvi-ai","type":"user-transcription","worker":"bot-1","data":{"text":"what's the weather","user_id":"u","timestamp":"","final":false}}}
 {"t":1789000006.7,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.8}}}
 {"t":1789000006.85,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.4}}}
 {"t":1789000007.0,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.5}}}
 {"t":1789000007.15,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.6000000000000001}}}
 {"t":1789000007.3,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.7000000000000001}}}
-{"t":1789000007.45,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.8}}}
-{"t":1789000006.6,"message":{"label":"rtvi-ai","type":"user-transcription","worker":"bot-1","data":{"text":"what's the weather","user_id":"u","timestamp":"","final":false}}}
 {"t":1789000007.4,"message":{"label":"rtvi-ai","type":"user-transcription","worker":"bot-1","data":{"text":"what's the weather like in Barcelona","user_id":"u","timestamp":"","final":false}}}
+{"t":1789000007.45,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.8}}}
 {"t":1789000007.9,"message":{"label":"tail","type":"tail-speech","timestamp":1789000007.9,"worker":"bot-1","data":{"kind":"user_speech_stopped","timestamp":1789000007.9,"started_at":1789000006.0}}}
 {"t":1789000008.1,"message":{"label":"rtvi-ai","type":"user-stopped-speaking","worker":"bot-1"}}
 {"t":1789000008.1,"message":{"label":"tail","type":"tail-speech","timestamp":1789000008.1,"worker":"bot-1","data":{"kind":"user_turn_stopped","timestamp":1789000008.1,"started_at":1789000006.1}}}
 {"t":1789000008.2,"message":{"label":"rtvi-ai","type":"user-transcription","worker":"bot-1","data":{"text":"what's the weather like in Barcelona right now","user_id":"u","timestamp":"","final":true}}}
 {"t":1789000008.2,"message":{"label":"rtvi-ai","type":"user-llm-text","worker":"bot-1","data":{"text":"what's the weather like in Barcelona right now"}}}
 {"t":1789000008.2,"message":{"label":"tail","type":"tail-log","timestamp":1789000008.2,"worker":"bot-1","data":{"time":"2026-09-16T09:40:20.112","level":"INFO","name":"pipecat.services.deepgram.stt","function":"_on_message","line":240,"message":"Transcription [final]: \"what's the weather like in Barcelona right now\""}}}
+{"t":1789000008.2,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
 {"t":1789000008.3,"message":{"label":"tail","type":"tail-log","timestamp":1789000008.3,"worker":"bot-1","data":{"time":"2026-09-16T09:40:20.119","level":"DEBUG","name":"pipecat.processors.aggregators.llm_response","function":"push","line":88,"message":"LLMUserAggregator pushing LLMMessagesFrame (4 messages)"}}}
+{"t":1789000008.35,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
+{"t":1789000008.5,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
+{"t":1789000008.65,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
 {"t":1789000008.8,"message":{"label":"tail","type":"tail-function-call","timestamp":1789000008.8,"worker":"bot-1","data":{"kind":"function_call_started","function_name":"get_weather","tool_call_id":"call_1","timestamp":1789000008.8,"arguments":{"location":"Barcelona"},"started_at":1789000008.8}}}
+{"t":1789000008.8,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
 {"t":1789000008.85,"message":{"label":"tail","type":"tail-function-call","timestamp":1789000008.85,"worker":"bot-1","data":{"kind":"function_call_in_progress","function_name":"get_weather","tool_call_id":"call_1","timestamp":1789000008.85,"arguments":{"location":"Barcelona"},"started_at":1789000008.8,"in_progress_at":1789000008.85}}}
+{"t":1789000008.95,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
+{"t":1789000009.1,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
+{"t":1789000009.25,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
 {"t":1789000009.3,"message":{"label":"tail","type":"tail-function-call","timestamp":1789000009.3,"worker":"bot-1","data":{"kind":"function_call_completed","function_name":"get_weather","tool_call_id":"call_1","timestamp":1789000009.26,"arguments":{"location":"Barcelona"},"result":{"temp_c":24,"sky":"sunny","wind_kph":11},"started_at":1789000008.8,"in_progress_at":1789000008.85}}}
 {"t":1789000009.4,"message":{"label":"rtvi-ai","type":"bot-llm-started","worker":"bot-1"}}
 {"t":1789000009.4,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":"Right"}}}
+{"t":1789000009.4,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
 {"t":1789000009.44,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" now"}}}
 {"t":1789000009.48,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" in"}}}
 {"t":1789000009.52,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" Barcelona"}}}
+{"t":1789000009.55,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
 {"t":1789000009.56,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" it"}}}
 {"t":1789000009.6,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" is"}}}
 {"t":1789000009.64,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" 24"}}}
 {"t":1789000009.68,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" degrees"}}}
+{"t":1789000009.7,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
 {"t":1789000009.72,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" and"}}}
 {"t":1789000009.76,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" sunny,"}}}
 {"t":1789000009.8,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" with"}}}
 {"t":1789000009.84,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" a"}}}
+{"t":1789000009.85,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
 {"t":1789000009.88,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" light"}}}
 {"t":1789000009.92,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" breeze"}}}
 {"t":1789000009.96,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" off"}}}
 {"t":1789000010.0,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" the"}}}
+{"t":1789000010.0,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
 {"t":1789000010.04,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" sea."}}}
 {"t":1789000010.08,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" A"}}}
 {"t":1789000010.12,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" good"}}}
+{"t":1789000010.15,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
 {"t":1789000010.16,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" evening"}}}
 {"t":1789000010.2,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" for"}}}
 {"t":1789000010.24,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" a"}}}
 {"t":1789000010.28,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" walk"}}}
+{"t":1789000010.3,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"Right now in Barcelona it is 24 degrees and sunny, with a light breeze off the sea.","aggregated_by":"sentence","segment_id":21,"will_be_spoken":true,"spoken_status":"new"}}}
+{"t":1789000010.3,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
 {"t":1789000010.32,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" along"}}}
 {"t":1789000010.36,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" the"}}}
 {"t":1789000010.4,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" beach."}}}
+{"t":1789000010.45,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
 {"t":1789000010.5,"message":{"label":"rtvi-ai","type":"bot-llm-stopped","worker":"bot-1"}}
-{"t":1789000010.3,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"Right now in Barcelona it is 24 degrees and sunny, with a light breeze off the sea.","aggregated_by":"sentence","segment_id":21,"will_be_spoken":true,"spoken_status":"new"}}}
 {"t":1789000010.6,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"A good evening for a walk along the beach.","aggregated_by":"sentence","segment_id":22,"will_be_spoken":true,"spoken_status":"new"}}}
+{"t":1789000010.6,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
+{"t":1789000010.75,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
 {"t":1789000010.8,"message":{"label":"rtvi-ai","type":"bot-started-speaking","worker":"bot-1"}}
 {"t":1789000010.8,"message":{"label":"tail","type":"tail-speech","timestamp":1789000010.8,"worker":"bot-1","data":{"kind":"bot_speech_started","timestamp":1789000010.8}}}
 {"t":1789000010.8,"message":{"label":"tail","type":"tail-latency","timestamp":1789000010.8,"worker":"bot-1","data":{"latency_secs":2.7,"first_bot_speech":false,"measured_from":"user_silence","total_secs":2.7,"contributions":[{"key":"endpointing_wait","label":"endpointing wait","owner":"config: VAD stop_secs","owner_kind":"setting","start_time":1789000007.9,"duration_secs":0.2},{"key":"transcription","label":"transcription","owner":"DeepgramSTTService#0","owner_kind":"service","start_time":1789000008.1,"duration_secs":0.1},{"key":"llm_inference","label":"LLM inference","owner":"OpenAILLMService#0","owner_kind":"service","start_time":1789000008.2,"duration_secs":0.6},{"key":"function_handler","label":"function handler","owner":"get_weather","owner_kind":"bot","start_time":1789000008.8,"duration_secs":0.45},{"key":"llm_inference","label":"LLM inference","owner":"OpenAILLMService#0","owner_kind":"service","start_time":1789000009.3,"duration_secs":0.95},{"key":"speech_synthesis","label":"speech synthesis","owner":"CartesiaTTSService#0","owner_kind":"service","start_time":1789000010.3,"duration_secs":0.4}],"function_calls":[{"function_name":"get_weather","start_time":1789000008.8,"duration_secs":0.45}]}}}
@@ -109,9 +127,31 @@
 {"t":1789000010.8,"message":{"label":"tail","type":"tail-service-usage","timestamp":1789000010.8,"worker":"bot-1","data":{"kind":"llm","processor":"OpenAILLMService#0","model":"gpt-4o","timestamp":1789000010.8,"prompt_tokens":1180,"completion_tokens":64,"total_tokens":1244}}}
 {"t":1789000010.8,"message":{"label":"tail","type":"tail-service-usage","timestamp":1789000010.8,"worker":"bot-1","data":{"kind":"stt","processor":"DeepgramSTTService#0","model":"nova-3","timestamp":1789000010.8,"audio_seconds":2.1}}}
 {"t":1789000010.8,"message":{"label":"tail","type":"tail-service-usage","timestamp":1789000010.8,"worker":"bot-1","data":{"kind":"tts","processor":"CartesiaTTSService#0","model":"sonic-2","timestamp":1789000010.8,"characters":132}}}
+{"t":1789000010.8,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.35}}}
 {"t":1789000010.9,"message":{"label":"tail","type":"tail-log","timestamp":1789000010.9,"worker":"bot-1","data":{"time":"2026-09-16T09:40:22.739","level":"INFO","name":"pipecat.services.openai.llm","function":"_process_context","line":301,"message":"OpenAILLMService#0 TTFB: 0.617"}}}
+{"t":1789000010.9,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
+{"t":1789000010.95,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.44999999999999996}}}
+{"t":1789000011.05,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
+{"t":1789000011.1,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.55}}}
 {"t":1789000011.2,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"Right now in Barcelona it is 24 degrees and sunny, with a light breeze off the sea.","aggregated_by":"sentence","segment_id":21,"will_be_spoken":true,"spoken_status":"in-progress","spoken_progress":{"accumulated_text":"Right now in Barcelona it is 24 degrees","remaining_text":" and sunny, with a light breeze off the sea."}}}}
+{"t":1789000011.2,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
+{"t":1789000011.25,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.65}}}
+{"t":1789000011.35,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
+{"t":1789000011.4,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.35}}}
+{"t":1789000011.5,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
+{"t":1789000011.55,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.44999999999999996}}}
+{"t":1789000011.65,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
+{"t":1789000011.7,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.55}}}
+{"t":1789000011.8,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
+{"t":1789000011.85,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.65}}}
+{"t":1789000011.95,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
+{"t":1789000012.0,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.35}}}
+{"t":1789000012.1,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
+{"t":1789000012.15,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.44999999999999996}}}
+{"t":1789000012.25,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
+{"t":1789000012.3,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.55}}}
 {"t":1789000012.4,"message":{"label":"tail","type":"tail-speech","timestamp":1789000012.4,"worker":"bot-1","data":{"kind":"user_speech_started","timestamp":1789000012.4}}}
+{"t":1789000012.4,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
 {"t":1789000012.5,"message":{"label":"tail","type":"tail-log","timestamp":1789000012.5,"worker":"bot-1","data":{"time":"2026-09-16T09:40:24.008","level":"WARNING","name":"pipecat.audio.vad.silero","function":"_handle","line":120,"message":"User started speaking while bot speaking, interrupting"}}}
 {"t":1789000012.5,"message":{"label":"rtvi-ai","type":"bot-interrupted","worker":"bot-1"}}
 {"t":1789000012.5,"message":{"label":"tail","type":"tail-speech","timestamp":1789000012.5,"worker":"bot-1","data":{"kind":"interruption","timestamp":1789000012.5}}}
@@ -121,27 +161,46 @@
 {"t":1789000012.5,"message":{"label":"tail","type":"tail-speech","timestamp":1789000012.5,"worker":"bot-1","data":{"kind":"user_turn_started","timestamp":1789000012.5}}}
 {"t":1789000012.5,"message":{"label":"tail","type":"tail-turn","timestamp":1789000012.5,"worker":"bot-1","data":{"kind":"ended","turn":2,"duration_secs":6.4,"was_interrupted":true}}}
 {"t":1789000012.5,"message":{"label":"tail","type":"tail-turn","timestamp":1789000012.5,"worker":"bot-1","data":{"kind":"started","turn":3}}}
+{"t":1789000012.55,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
+{"t":1789000012.7,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
+{"t":1789000012.85,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
 {"t":1789000013.0,"message":{"label":"rtvi-ai","type":"user-transcription","worker":"bot-1","data":{"text":"okay thanks, that's all I","user_id":"u","timestamp":"","final":false}}}
+{"t":1789000013.0,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
 {"t":1789000013.1,"message":{"label":"tail","type":"tail-error","timestamp":1789000013.1,"worker":"bot-1","data":{"message":"audio track lost, reconnecting","category":"connectivity","processor":"DailyOutputTransport#0","processor_usable":true,"timestamp":1789000013.1}}}
 {"t":1789000013.1,"message":{"label":"tail","type":"tail-log","timestamp":1789000013.1,"worker":"bot-1","data":{"time":"2026-09-16T09:40:24.610","level":"ERROR","name":"pipecat.transports.daily","function":"_on_error","line":512,"message":"ErrorFrame: audio track lost, reconnecting"}}}
+{"t":1789000013.15,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
+{"t":1789000013.3,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
 {"t":1789000013.4,"message":{"label":"tail","type":"tail-bus","timestamp":1789000013.4,"data":{"name":"BusWorkerErrorMessage#1","message_type":"BusWorkerErrorMessage","category":"lifecycle","source":"bot-1","target":null,"payload":{"error":"audio track lost, reconnecting"}}}}
+{"t":1789000013.45,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
 {"t":1789000013.5,"message":{"label":"tail","type":"tail-job","timestamp":1789000013.5,"data":{"kind":"updated","job_id":"a91f2c3d4e","source":"bot-1","target":"runner-1","update":{"state":"audio_restored"}}}}
+{"t":1789000013.6,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
+{"t":1789000013.75,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
 {"t":1789000013.9,"message":{"label":"tail","type":"tail-speech","timestamp":1789000013.9,"worker":"bot-1","data":{"kind":"user_speech_stopped","timestamp":1789000013.9,"started_at":1789000012.4}}}
+{"t":1789000013.9,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
+{"t":1789000014.05,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
 {"t":1789000014.1,"message":{"label":"rtvi-ai","type":"user-stopped-speaking","worker":"bot-1"}}
 {"t":1789000014.1,"message":{"label":"tail","type":"tail-speech","timestamp":1789000014.1,"worker":"bot-1","data":{"kind":"user_turn_stopped","timestamp":1789000014.1,"started_at":1789000012.5}}}
 {"t":1789000014.2,"message":{"label":"rtvi-ai","type":"user-transcription","worker":"bot-1","data":{"text":"okay thanks, that's all I needed","user_id":"u","timestamp":"","final":true}}}
 {"t":1789000014.2,"message":{"label":"rtvi-ai","type":"user-llm-text","worker":"bot-1","data":{"text":"okay thanks, that's all I needed"}}}
+{"t":1789000014.2,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
+{"t":1789000014.35,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
+{"t":1789000014.5,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
+{"t":1789000014.65,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
 {"t":1789000014.7,"message":{"label":"rtvi-ai","type":"bot-llm-started","worker":"bot-1"}}
 {"t":1789000014.7,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":"You're"}}}
 {"t":1789000014.74,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" welcome."}}}
 {"t":1789000014.78,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" Enjoy"}}}
+{"t":1789000014.8,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
 {"t":1789000014.82,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" your"}}}
 {"t":1789000014.86,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" evening"}}}
 {"t":1789000014.9,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" in"}}}
-{"t":1789000014.94,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" Barcelona."}}}
-{"t":1789000015.0,"message":{"label":"rtvi-ai","type":"bot-llm-stopped","worker":"bot-1"}}
 {"t":1789000014.9,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"You're welcome.","aggregated_by":"sentence","segment_id":31,"will_be_spoken":true,"spoken_status":"new"}}}
+{"t":1789000014.94,"message":{"label":"rtvi-ai","type":"bot-llm-text","worker":"bot-1","data":{"text":" Barcelona."}}}
+{"t":1789000014.95,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
+{"t":1789000015.0,"message":{"label":"rtvi-ai","type":"bot-llm-stopped","worker":"bot-1"}}
 {"t":1789000015.0,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"Enjoy your evening in Barcelona.","aggregated_by":"sentence","segment_id":32,"will_be_spoken":true,"spoken_status":"new"}}}
+{"t":1789000015.1,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
+{"t":1789000015.25,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
 {"t":1789000015.3,"message":{"label":"rtvi-ai","type":"bot-started-speaking","worker":"bot-1"}}
 {"t":1789000015.3,"message":{"label":"tail","type":"tail-speech","timestamp":1789000015.3,"worker":"bot-1","data":{"kind":"bot_speech_started","timestamp":1789000015.3}}}
 {"t":1789000015.3,"message":{"label":"tail","type":"tail-latency","timestamp":1789000015.3,"worker":"bot-1","data":{"latency_secs":1.4,"first_bot_speech":false,"measured_from":"user_silence","total_secs":1.4,"contributions":[{"key":"endpointing_wait","label":"endpointing wait","owner":"config: VAD stop_secs","owner_kind":"setting","start_time":1789000013.9,"duration_secs":0.2},{"key":"transcription","label":"transcription","owner":"DeepgramSTTService#0","owner_kind":"service","start_time":1789000014.1,"duration_secs":0.1},{"key":"llm_inference","label":"LLM inference","owner":"OpenAILLMService#0","owner_kind":"service","start_time":1789000014.2,"duration_secs":0.7},{"key":"speech_synthesis","label":"speech synthesis","owner":"CartesiaTTSService#0","owner_kind":"service","start_time":1789000014.9,"duration_secs":0.4}]}}}
@@ -151,20 +210,32 @@
 {"t":1789000015.3,"message":{"label":"tail","type":"tail-service-usage","timestamp":1789000015.3,"worker":"bot-1","data":{"kind":"llm","processor":"OpenAILLMService#0","model":"gpt-4o","timestamp":1789000015.3,"prompt_tokens":1260,"completion_tokens":14,"total_tokens":1274}}}
 {"t":1789000015.3,"message":{"label":"tail","type":"tail-service-usage","timestamp":1789000015.3,"worker":"bot-1","data":{"kind":"stt","processor":"DeepgramSTTService#0","model":"nova-3","timestamp":1789000015.3,"audio_seconds":1.5}}}
 {"t":1789000015.3,"message":{"label":"tail","type":"tail-service-usage","timestamp":1789000015.3,"worker":"bot-1","data":{"kind":"tts","processor":"CartesiaTTSService#0","model":"sonic-2","timestamp":1789000015.3,"characters":48}}}
-{"t":1789000015.8,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"You're welcome.","aggregated_by":"sentence","segment_id":31,"will_be_spoken":true,"spoken_status":"completed","spoken_progress":{"accumulated_text":"You're welcome.","remaining_text":""}}}}
-{"t":1789000017.2,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"Enjoy your evening in Barcelona.","aggregated_by":"sentence","segment_id":32,"will_be_spoken":true,"spoken_status":"completed","spoken_progress":{"accumulated_text":"Enjoy your evening in Barcelona.","remaining_text":""}}}}
 {"t":1789000015.3,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.25}}}
+{"t":1789000015.4,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
 {"t":1789000015.45,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.35}}}
+{"t":1789000015.55,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
 {"t":1789000015.6,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.45}}}
+{"t":1789000015.7,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
 {"t":1789000015.75,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.55}}}
+{"t":1789000015.8,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"You're welcome.","aggregated_by":"sentence","segment_id":31,"will_be_spoken":true,"spoken_status":"completed","spoken_progress":{"accumulated_text":"You're welcome.","remaining_text":""}}}}
+{"t":1789000015.85,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
 {"t":1789000015.9,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.65}}}
+{"t":1789000016.0,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
 {"t":1789000016.05,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.25}}}
+{"t":1789000016.15,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
 {"t":1789000016.2,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.35}}}
+{"t":1789000016.3,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
 {"t":1789000016.35,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.45}}}
+{"t":1789000016.45,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
 {"t":1789000016.5,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.55}}}
+{"t":1789000016.6,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
 {"t":1789000016.65,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.65}}}
+{"t":1789000016.75,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.03}}}
 {"t":1789000016.8,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.25}}}
+{"t":1789000016.9,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.05}}}
 {"t":1789000016.95,"message":{"label":"rtvi-ai","type":"bot-audio-level","worker":"bot-1","data":{"value":0.35}}}
+{"t":1789000017.05,"message":{"label":"rtvi-ai","type":"user-audio-level","worker":"bot-1","data":{"value":0.07}}}
+{"t":1789000017.2,"message":{"label":"rtvi-ai","type":"bot-output","worker":"bot-1","data":{"text":"Enjoy your evening in Barcelona.","aggregated_by":"sentence","segment_id":32,"will_be_spoken":true,"spoken_status":"completed","spoken_progress":{"accumulated_text":"Enjoy your evening in Barcelona.","remaining_text":""}}}}
 {"t":1789000017.3,"message":{"label":"rtvi-ai","type":"bot-stopped-speaking","worker":"bot-1"}}
 {"t":1789000017.3,"message":{"label":"tail","type":"tail-speech","timestamp":1789000017.3,"worker":"bot-1","data":{"kind":"bot_speech_stopped","timestamp":1789000017.3,"started_at":1789000015.3}}}
 {"t":1789000019.8,"message":{"label":"tail","type":"tail-turn","timestamp":1789000019.8,"worker":"bot-1","data":{"kind":"ended","turn":3,"duration_secs":7.3,"was_interrupted":false}}}
