@@ -333,8 +333,6 @@ class WorkerSession:
         self.bot_speaking = False
         self.user_level = 0.0
         self.bot_level = 0.0
-        self.user_level_at = 0.0
-        self.bot_level_at = 0.0
         self.user_levels: Deque[float] = deque([0.0] * MAX_LEVELS, maxlen=MAX_LEVELS)
         self.bot_levels: Deque[float] = deque([0.0] * MAX_LEVELS, maxlen=MAX_LEVELS)
         self.finished = False
@@ -504,23 +502,6 @@ class SessionState:
                 session.user_level = 0.0
                 session.bot_level = 0.0
         return {STATUS, STRIP}
-
-    def decay_levels(self, max_age_secs: float = 0.5) -> bool:
-        """Drop audio levels that have not been refreshed recently.
-
-        Returns:
-            Whether any level changed.
-        """
-        now = time.time()
-        changed = False
-        for session in self.sessions.values():
-            if session.user_level > 0 and now - session.user_level_at > max_age_secs:
-                session.user_level = 0.0
-                changed = True
-            if session.bot_level > 0 and now - session.bot_level_at > max_age_secs:
-                session.bot_level = 0.0
-                changed = True
-        return changed
 
     @property
     def active_errors(self) -> list[ErrorRecord]:
@@ -853,19 +834,15 @@ class SessionState:
                 return {STRIP}
             case "bot-stopped-speaking":
                 session.bot_speaking = False
-                session.bot_level = 0.0
-                session.bot_levels.append(0.0)
                 return {STRIP}
             case "user-audio-level":
                 level = data.get("value", 0.0)
                 session.user_level = float(level) if isinstance(level, (int, float)) else 0.0
-                session.user_level_at = time.time()
                 session.user_levels.append(session.user_level)
                 return {STRIP}
             case "bot-audio-level":
                 level = data.get("value", 0.0)
                 session.bot_level = float(level) if isinstance(level, (int, float)) else 0.0
-                session.bot_level_at = time.time()
                 session.bot_levels.append(session.bot_level)
                 return {STRIP}
             case "user-transcription":
