@@ -75,6 +75,22 @@ CONTRIBUTION_FALLBACK = DIM
 
 LEVEL_BLOCKS = "▁▂▃▄▅▆▇█"
 
+# Same gradient the old audio meters used, from quiet to loud.
+LEVEL_GRADIENT = [
+    "#881177",
+    "#aa3355",
+    "#cc6666",
+    "#ee9944",
+    "#eedd00",
+    "#99dd55",
+    "#44dd88",
+    "#22ccbb",
+    "#00bbcc",
+    "#0099cc",
+    "#3366bb",
+    "#663399",
+]
+
 
 def contribution_color(key: str) -> str:
     """Color for a latency contribution key."""
@@ -134,6 +150,35 @@ def level_meter(levels: Sequence[float], color: str = GREEN) -> Text:
         index = min(len(LEVEL_BLOCKS) - 1, max(0, int(round(level * (len(LEVEL_BLOCKS) - 1)))))
         chars.append(LEVEL_BLOCKS[index])
     return Text("".join(chars), style=Style(color=color))
+
+
+def _blend(a: str, b: str, t: float) -> str:
+    ar, ag, ab = int(a[1:3], 16), int(a[3:5], 16), int(a[5:7], 16)
+    br, bg, bb = int(b[1:3], 16), int(b[3:5], 16), int(b[5:7], 16)
+    return "#{:02x}{:02x}{:02x}".format(
+        round(ar + (br - ar) * t), round(ag + (bg - ag) * t), round(ab + (bb - ab) * t)
+    )
+
+
+def gradient_color(fraction: float) -> str:
+    """Color of the level gradient at ``fraction`` in ``[0, 1]``."""
+    stops = LEVEL_GRADIENT
+    position = max(0.0, min(1.0, fraction)) * (len(stops) - 1)
+    index = min(int(position), len(stops) - 2)
+    return _blend(stops[index], stops[index + 1], position - index)
+
+
+def level_bar(level: float, width: int = 12) -> Text:
+    """Draw a level meter that fills with the gradient as ``level`` rises."""
+    width = max(width, 1)
+    filled = max(0, min(width, int(round(max(0.0, min(1.0, level)) * width))))
+    text = Text()
+    for i in range(width):
+        if i < filled:
+            text.append("█", style=Style(color=gradient_color(i / max(width - 1, 1))))
+        else:
+            text.append("░", style=Style(color=POLAR_1))
+    return text
 
 
 def bar(fraction: float, width: int, color: str, *, fill: str = "█", empty: str = "░") -> Text:

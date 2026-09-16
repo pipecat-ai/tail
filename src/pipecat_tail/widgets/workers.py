@@ -54,6 +54,17 @@ class WorkerTree(Tree):
         self.border_title = "Workers"
         self.show_root = True
         self.guide_depth = 3
+        self._expanded: set[str] = set()
+
+    def on_tree_node_expanded(self, event: Tree.NodeExpanded) -> None:
+        """Remember which pipelines the user opened."""
+        if isinstance(event.node.data, str):
+            self._expanded.add(event.node.data)
+
+    def on_tree_node_collapsed(self, event: Tree.NodeCollapsed) -> None:
+        """Forget pipelines the user closed."""
+        if isinstance(event.node.data, str):
+            self._expanded.discard(event.node.data)
 
     def sync(self, state: SessionState) -> None:
         """Rebuild the tree from the state."""
@@ -94,14 +105,18 @@ class WorkerTree(Tree):
             child = node.add(label, expand=True)
             processors = info.processors if info else []
             if processors:
-                shape = Text(" → ".join(processors), style=STYLE_DIM)
-                child.add_leaf(shape)
+                header = Text()
+                header.append("pipeline", style=STYLE_TEXT)
+                header.append(f"  {len(processors)} processors", style=STYLE_DIM)
+                pipeline = child.add(header, data=name, expand=name in self._expanded)
+                for processor in processors:
+                    pipeline.add_leaf(Text(processor, style=STYLE_DIM))
             for grandchild in by_parent.get(name, []):
                 add(child, grandchild)
 
         for name in by_parent.get(None, []):
             add(self.root, name)
-        self.root.expand_all()
+        self.root.expand()
 
 
 def _status_style(status: str):

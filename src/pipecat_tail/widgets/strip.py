@@ -11,18 +11,17 @@ from textual.widgets import Static
 
 from pipecat_tail.state import SessionState
 from pipecat_tail.widgets.render import (
-    DIM,
-    GREEN,
-    PURPLE,
+    STYLE_BOT,
     STYLE_BRIGHT,
     STYLE_DIM,
     STYLE_ERROR,
     STYLE_LABEL,
     STYLE_TEXT,
+    STYLE_USER,
     fmt_clock,
     fmt_int,
     fmt_secs_fixed,
-    level_meter,
+    level_bar,
     status_dot,
     truncate,
 )
@@ -74,11 +73,11 @@ class TopStrip(Static):
             field("tts", f"{fmt_int(session.tts_characters)} ch")
 
         text.append("   ")
-        text.append("user ", style=STYLE_LABEL)
-        text.append_text(level_meter(session.user_levels, GREEN if session.user_speaking else DIM))
+        text.append("user ", style=STYLE_USER if session.user_speaking else STYLE_LABEL)
+        text.append_text(level_bar(session.user_level))
         text.append("  ")
-        text.append("bot ", style=STYLE_LABEL)
-        text.append_text(level_meter(session.bot_levels, PURPLE if session.bot_speaking else DIM))
+        text.append("bot ", style=STYLE_BOT if session.bot_speaking else STYLE_LABEL)
+        text.append_text(level_bar(session.bot_level))
         self.update(text)
 
 
