@@ -75,20 +75,17 @@ CONTRIBUTION_FALLBACK = DIM
 
 LEVEL_BLOCKS = "▁▂▃▄▅▆▇█"
 
-# Same gradient the old audio meters used, from quiet to loud.
+# Audio meter gradient: blue when quiet, red when loud.
 LEVEL_GRADIENT = [
-    "#881177",
-    "#aa3355",
-    "#cc6666",
-    "#ee9944",
-    "#eedd00",
-    "#99dd55",
-    "#44dd88",
-    "#22ccbb",
-    "#00bbcc",
-    "#0099cc",
     "#3366bb",
-    "#663399",
+    "#0099cc",
+    "#22ccbb",
+    "#44dd88",
+    "#99dd55",
+    "#eedd00",
+    "#ee9944",
+    "#dd5533",
+    "#cc2222",
 ]
 
 
