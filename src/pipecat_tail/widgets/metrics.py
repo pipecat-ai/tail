@@ -218,6 +218,12 @@ class SummaryTable(DataTable):
             self.add_row(*row)
 
 
+def _startup_total(timing: dict[str, Any]) -> float:
+    setup = float(timing.get("setup_duration_secs", 0.0) or 0.0)
+    start = float(timing.get("start_duration_secs", 0.0) or 0.0)
+    return setup + start
+
+
 class StartupPanel(Static):
     """Per-processor setup time and transport milestones for the last start."""
 
@@ -250,6 +256,8 @@ class StartupPanel(Static):
             )
             return text
         timings = [t for t in report.get("processor_timings", []) if isinstance(t, dict)]
+        # Slowest first: setup plus start is what delays the pipeline.
+        timings.sort(key=_startup_total, reverse=True)
         name_width = max([len(str(t.get("processor_name", ""))) for t in timings] + [9])
         name_width = min(name_width, 40)
         bar_width = max(self.size.width - name_width - 26, 10)
