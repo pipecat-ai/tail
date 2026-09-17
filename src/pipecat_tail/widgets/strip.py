@@ -34,7 +34,9 @@ class LevelMeter(ProgressBar):
         """Create the meter."""
         super().__init__(
             total=1.0,
-            gradient=Gradient.from_colors(*LEVEL_GRADIENT),
+            # Textual paints the fill's gradient from its right end back to
+            # the left, so the colors go in reversed to keep blue on the left.
+            gradient=Gradient.from_colors(*reversed(LEVEL_GRADIENT)),
             show_percentage=False,
             show_eta=False,
             id=id,
