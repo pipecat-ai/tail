@@ -388,6 +388,7 @@ def build_messages(start: float | None = None) -> list[tuple[float, dict]]:
     for i in range(8):
         at(3.2 + i * 0.15, rtvi("bot-audio-level", {"value": 0.3 + 0.08 * (i % 4)}))
     at(4.4, rtvi("bot-stopped-speaking"))
+    at(4.4, rtvi("bot-audio-level", {"value": 0.0}))
     at(
         4.4,
         tail(
@@ -772,6 +773,7 @@ def build_messages(start: float | None = None) -> list[tuple[float, dict]]:
     at(12.5, rtvi("bot-interrupted"))
     at(12.5, tail("tail-speech", {"kind": "interruption", "timestamp": t0 + 12.5}))
     at(12.5, rtvi("bot-stopped-speaking"))
+    at(12.5, rtvi("bot-audio-level", {"value": 0.0}))
     at(
         12.5,
         tail(
@@ -1073,6 +1075,7 @@ def build_messages(start: float | None = None) -> list[tuple[float, dict]]:
     for i in range(12):
         at(15.3 + i * 0.15, rtvi("bot-audio-level", {"value": 0.25 + 0.1 * (i % 5)}))
     at(17.3, rtvi("bot-stopped-speaking"))
+    at(17.3, rtvi("bot-audio-level", {"value": 0.0}))
     at(
         17.3,
         tail(

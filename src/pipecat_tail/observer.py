@@ -28,7 +28,7 @@ import time
 from typing import Any, Optional
 
 from loguru import logger
-from pipecat.frames.frames import MetricsFrame, StartFrame
+from pipecat.frames.frames import BotStoppedSpeakingFrame, MetricsFrame, StartFrame
 from pipecat.metrics.metrics import ProcessingMetricsData
 from pipecat.observers.base_observer import (
     BaseObserver,
@@ -45,6 +45,11 @@ from pipecat.observers.startup_timing_observer import StartupTimingObserver
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.pipeline.pipeline import PipelineSink, PipelineSource
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frameworks.rtvi.models import (
+    AudioLevelMessageData,
+    BotAudioLevelMessage,
+)
 from pipecat.processors.frameworks.rtvi.observer import (
     RTVIFunctionCallReportLevel,
     RTVIObserver,
@@ -157,6 +162,7 @@ class TailObserver(RTVIObserver):
         self._processors: list[str] = []
         self._pipeline_finished = False
         self._metrics_seen: set[int] = set()
+        self._bot_stopped_seen: set[int] = set()
         self._logger_id: Optional[int] = None
 
         # Pipecat observers that add what RTVI does not carry.
@@ -257,6 +263,20 @@ class TailObserver(RTVIObserver):
             await child.on_push_frame(data)
 
         frame = data.frame
+        if (
+            isinstance(frame, BotStoppedSpeakingFrame)
+            and data.direction == FrameDirection.DOWNSTREAM
+            and frame.id not in self._bot_stopped_seen
+            and self._params.bot_audio_level_enabled
+        ):
+            # Levels come from TTS audio frames, which end with the speech.
+            # Send a final zero so the meter does not freeze at its last value.
+            self._bot_stopped_seen.add(frame.id)
+            if len(self._bot_stopped_seen) > 1000:
+                self._bot_stopped_seen.clear()
+            await self.send_rtvi_message(
+                BotAudioLevelMessage(data=AudioLevelMessageData(value=0.0))
+            )
         if isinstance(frame, MetricsFrame) and frame.id not in self._metrics_seen:
             if len(self._metrics_seen) > 10000:
                 self._metrics_seen.clear()
