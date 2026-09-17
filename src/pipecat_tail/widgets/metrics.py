@@ -140,9 +140,10 @@ class SummaryTable(DataTable):
         self.add_columns("service", "kind", "last", "avg", "p95", "n", "detail")
 
     def sync(self, session: WorkerSession) -> None:
-        """Rebuild the rows from a session."""
+        """Rebuild the rows from a session, one service at a time, alphabetically."""
         self.clear()
-        for (processor, kind), points in sorted(session.metrics.items()):
+        rows: list[tuple[tuple, tuple]] = []
+        for (processor, kind), points in session.metrics.items():
             values = [p.seconds for p in points]
             last = values[-1]
             avg = sum(values) / len(values)
@@ -156,16 +157,21 @@ class SummaryTable(DataTable):
             model = points[-1].model
             if model:
                 extra = f"{model}  {extra}".strip()
-            self.add_row(
-                processor,
-                kind,
-                Text(fmt_secs_fixed(last), style=STYLE_BRIGHT),
-                fmt_secs_fixed(avg),
-                fmt_secs_fixed(p95),
-                str(len(values)),
-                extra,
+            rows.append(
+                (
+                    (processor.lower(), 0, kind),
+                    (
+                        processor,
+                        kind,
+                        Text(fmt_secs_fixed(last), style=STYLE_BRIGHT),
+                        fmt_secs_fixed(avg),
+                        fmt_secs_fixed(p95),
+                        str(len(values)),
+                        extra,
+                    ),
+                )
             )
-        for (processor, kind), totals in sorted(session.usage.items()):
+        for (processor, kind), totals in session.usage.items():
             if kind == "llm":
                 detail = (
                     f"prompt {fmt_int(totals.prompt_tokens)} · "
@@ -194,15 +200,22 @@ class SummaryTable(DataTable):
                 value = str(totals.count)
                 label = kind
                 detail = ""
-            self.add_row(
-                processor,
-                label,
-                Text(value, style=STYLE_BRIGHT),
-                "",
-                "",
-                str(totals.count),
-                detail,
+            rows.append(
+                (
+                    (processor.lower(), 1, label),
+                    (
+                        processor,
+                        label,
+                        Text(value, style=STYLE_BRIGHT),
+                        "",
+                        "",
+                        str(totals.count),
+                        detail,
+                    ),
+                )
             )
+        for _, row in sorted(rows, key=lambda item: item[0]):
+            self.add_row(*row)
 
 
 class StartupPanel(Static):
