@@ -20,6 +20,15 @@ Screen {
     width: 1fr;
 }
 
+#strip-rec {
+    width: auto;
+    padding: 0 1;
+    margin: 0 1;
+    background: $error;
+    color: $text;
+    text-style: bold;
+}
+
 #strip Label {
     color: $text-muted;
     margin: 0 1;

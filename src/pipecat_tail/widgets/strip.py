@@ -6,6 +6,9 @@
 
 """The always-visible strip under the header and the error banner."""
 
+import os
+from typing import Optional
+
 from rich.text import Text
 from textual.color import Gradient
 from textual.containers import Horizontal
@@ -54,16 +57,33 @@ class TopStrip(Horizontal):
         """Create the strip."""
         super().__init__(id="strip")
         self._text = Static(Text(""), id="strip-text")
+        self._recording = Static(Text(""), id="strip-rec")
+        self._recording.display = False
         self.user_meter = LevelMeter("user-meter")
         self.bot_meter = LevelMeter("bot-meter")
 
     def compose(self):
-        """Compose the text and the two meters."""
+        """Compose the text, the recording badge and the two meters."""
         yield self._text
+        yield self._recording
         yield Label("user", id="user-label")
         yield self.user_meter
         yield Label("bot", id="bot-label")
         yield self.bot_meter
+
+    def set_recording(self, path: Optional[str], count: int = 0) -> None:
+        """Show, update or hide the recording badge.
+
+        Args:
+            path: The file being written, or ``None`` when not recording.
+            count: Messages written so far.
+        """
+        if path is None:
+            self._recording.display = False
+            return
+        name = os.path.basename(path)
+        self._recording.update(Text(f"● REC {name} · {count:,}"))
+        self._recording.display = True
 
     @property
     def content(self):

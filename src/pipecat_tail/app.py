@@ -206,6 +206,8 @@ class TailApp(App):
             return
         dirty, self._dirty = self._dirty, set()
         session = self.state.selected
+        if self._writer:
+            self.strip.set_recording(str(self._writer.path), self._writer.count)
         if STRIP in dirty or STATUS in dirty:
             self.strip.update_from(self.state)
         if ERRORS in dirty:
@@ -310,6 +312,7 @@ class TailApp(App):
             count = self._writer.count
             self._writer.close()
             self._writer = None
+            self.strip.set_recording(None)
             self.notify(f"Saved {count} messages to {path}", timeout=4)
             return
         import datetime
@@ -323,6 +326,7 @@ class TailApp(App):
         except OSError as e:
             self.notify(f"Unable to write {path}: {e}", severity="error")
             return
+        self.strip.set_recording(path, 0)
         self.notify(f"Recording to {path} (s to stop)", timeout=4)
 
     async def action_connect(self) -> None:
