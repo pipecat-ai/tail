@@ -1,56 +1,231 @@
-LeftPanel {
-    border: $primary;
-    width: 20%;
+Screen {
+    layout: vertical;
 }
 
-MiddlePanel {
-    width: 60%;
+#banner {
+    height: 1;
+    padding: 0 1;
+    background: $error 30%;
+    color: $text;
 }
 
-RightPanel {
-    border: $primary;
-    padding: 1;
-    width: 20%;
+#strip {
+    height: 1;
+    padding: 0 1;
+    background: $surface;
+    color: $text;
 }
 
-Conversation {
-    border: $primary;
-    height: 60%;
+#strip-text {
+    width: 1fr;
 }
 
-SystemLogs {
-    border: $primary;
-    height: 40%;
+#strip-rec {
+    width: auto;
+    padding: 0 1;
+    margin: 0 1;
+    background: $error;
+    color: $text;
+    text-style: bold;
 }
 
-SystemInfo {
-    border: $primary;
+#strip Label {
+    color: $text-muted;
+    margin: 0 1;
 }
 
-LLMServiceInfo {
-    border: $primary;
+#strip Label.speaking {
+    color: $text;
+    text-style: bold;
 }
 
-TTSServiceInfo {
-    border: $primary;
+#strip LevelMeter {
+    width: 16;
 }
 
-ServiceMetrics {
-    height: 30%;
+#strip LevelMeter Bar {
+    width: 16;
 }
 
-AudioLevel {
-    height: 5%;
+#tabs {
+    height: 1fr;
 }
 
-ConnectedStatus {
-    color: $text-success;
+TabPane {
+    padding: 0 1;
 }
 
-DisconnectedStatus {
-    color: $text-primary;
+/* Conversation */
+
+#conversation-view {
+    height: 1fr;
+    border: round $primary;
+    border-title-color: $secondary;
+    border-subtitle-align: left;
+    padding: 0 1;
 }
 
-ErrorStatus {
-    color: $text-error;
+#conversation-view .turn {
+    padding: 0 1;
+    margin-bottom: 1;
+    border-left: wide $primary 60%;
+}
+
+#conversation-view .turn.alt {
+    background: $boost;
+}
+
+#conversation-view .turn.interrupted {
+    border-left: wide $error;
+}
+
+/* Latency */
+
+#latency-view {
+    height: 1fr;
+}
+
+#latency-bars {
+    height: 1fr;
+    border: round $primary;
+    border-title-color: $secondary;
+    border-subtitle-color: $text-muted;
+    padding: 0 1;
+}
+
+.latency-ruler {
+    height: 1;
+}
+
+#latency-scroll {
+    height: 1fr;
+}
+
+#latency-bottom {
+    height: 11;
+}
+
+#latency-stats {
+    width: 1fr;
+    height: 100%;
+    border: round $primary;
+    border-title-color: $secondary;
+    padding: 0 1;
+}
+
+#latency-legend {
+    width: 1fr;
+    height: 100%;
+    border: round $primary;
+    border-title-color: $secondary;
+    padding: 0 1;
+}
+
+#speaking-timeline {
+    height: 8;
+    border-subtitle-align: left;
+    border: round $primary;
+    border-title-color: $secondary;
+    border-subtitle-color: $text-muted;
+    padding: 0 1;
+}
+
+/* Workers */
+
+#workers-view {
+    height: 1fr;
+}
+
+#workers-top {
+    height: 2fr;
+}
+
+#worker-tree {
+    width: 2fr;
+    height: 100%;
+    border: round $primary;
+    border-title-color: $secondary;
+    padding: 0 1;
+}
+
+#jobs-table {
+    width: 3fr;
+    height: 100%;
+    border: round $primary;
+    border-title-color: $secondary;
+}
+
+#bus-feed {
+    height: 3fr;
+    border: round $primary;
+    border-title-color: $secondary;
+    border-subtitle-color: $text-muted;
+    padding: 0 1;
+}
+
+/* Metrics */
+
+#metrics-view {
+    height: 1fr;
+}
+
+#metrics-top {
+    height: 2fr;
+}
+
+#latency-chart {
+    width: 3fr;
+    border: round $primary;
+    border-title-color: $secondary;
+}
+
+#series {
+    width: 1fr;
+    height: 100%;
+    border: round $primary;
+    border-title-color: $secondary;
+}
+
+#summary-table {
+    height: 1fr;
+    border: round $primary;
+    border-title-color: $secondary;
+}
+
+#startup {
+    height: auto;
+    max-height: 40%;
+    border: round $primary;
+    border-title-color: $secondary;
+    border-subtitle-color: $text-muted;
+    padding: 0 1;
+    overflow-y: auto;
+}
+
+/* Logs */
+
+#logs-view {
+    height: 1fr;
+}
+
+#log-toolbar {
+    height: auto;
+}
+
+#log-search {
+    width: 1fr;
+}
+
+#log-lines {
+    height: 1fr;
+    border: round $primary;
+    border-title-color: $secondary;
+    border-subtitle-color: $text-muted;
+    padding: 0 1;
+}
+
+#log-pinned {
+    height: 1;
+    padding: 0 1;
+    background: $surface;
 }

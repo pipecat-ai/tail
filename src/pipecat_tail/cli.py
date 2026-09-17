@@ -8,112 +8,116 @@
 
 """Tail standalone application.
 
-This is the standalone application for Tail. It connects to a Tail observer,
-whether local or remote, to receive the current conversation, service metrics,
-audio levels or system logs.
+Connects to a Tail server, local or remote, and shows the session as it
+happens. Reconnects on its own when the bot restarts. Can also record the
+session to a file, or replay a recorded one without a bot.
 
-This is registered as a `tail` command for the `pipecat-cli`.
+Registered as the ``tail`` command of the ``pipecat`` CLI.
 """
 
 import asyncio
-import json
 import sys
+from typing import Optional
 
 import typer
-import websockets
 from loguru import logger
 
 from pipecat_tail.app import TailApp
+from pipecat_tail.client import TailClient
+from pipecat_tail.session import replay_session
 
 DEFAULT_URL = "ws://localhost:9292"
 
 
 class PipecatTail:
-    """Standalone Tail application.
+    """Standalone Tail application driven by a websocket connection."""
 
-    This is the standalone Tail application. It connects to an observer, whether
-    local or remote, and updates the UI based on the received messages.
-    """
-
-    def __init__(self, *, url: str = DEFAULT_URL):
-        """Initialize the Tail application.
-
-        It will try to connect to the provided URL. If it can not connect, it is
-        possible to connect later from the UI.
+    def __init__(self, *, url: str = DEFAULT_URL, save: Optional[str] = None):
+        """Initialize the application.
 
         Args:
-            url: Observer URL.
+            url: Tail server URL.
+            save: Session file to record to from the start.
         """
         self._url = url
-
         self._app = TailApp(
-            on_mount=self._app_on_mount,
-            on_shutdown=self._app_on_shutdown,
-            action_connect=self._app_action_connect,
+            on_mount=self._on_mount,
+            on_shutdown=self._on_shutdown,
+            action_connect=self._on_connect,
+            save_path=save,
         )
-        self._ws = None
-        self._receiver_task = None
+        self._client = TailClient(
+            url, on_message=self._app.handle_message, on_status=self._app.handle_status
+        )
+        self._logger_id: Optional[int] = None
 
-    async def run(self):
-        """Run the application event loop asynchronously."""
+    async def run(self) -> None:
+        """Run the app until it quits."""
         await self._app.run_async()
 
-    async def _app_on_mount(self):
-        """App lifecycle hook called when the UI is started."""
+    async def _on_mount(self) -> None:
+        # The app owns the terminal; keep our own logs out of it.
         logger.remove()
-        self._logger_id = logger.add(self._logger_sink)
-        await self._connect()
+        self._client.start()
 
-    async def _app_on_shutdown(self):
-        """App lifecycle hook called when the UI is shutting down."""
-        await self._disconnect()
-        logger.remove(self._logger_id)
+    async def _on_shutdown(self) -> None:
+        await self._client.stop()
         logger.add(sys.stderr)
 
-    async def _app_action_connect(self):
-        """UI action handler to (re)connect to the observer."""
-        await self._connect()
+    async def _on_connect(self) -> None:
+        self._client.reconnect_now()
 
-    async def _logger_sink(self, message: str):
-        await self._app.handle_system_log(message)
 
-    async def _connect(self):
-        """Connect to the observer."""
+class PipecatTailReplay:
+    """Standalone Tail application driven by a recorded session."""
+
+    def __init__(self, *, path: str, speed: float = 1.0):
+        """Initialize the application.
+
+        Args:
+            path: Session file to replay.
+            speed: Playback speed multiplier. ``0`` loads everything at once.
+        """
+        self._path = path
+        self._speed = speed
+        self._app = TailApp(on_mount=self._on_mount, on_shutdown=self._on_shutdown)
+        self._task: Optional[asyncio.Task] = None
+
+    async def run(self) -> None:
+        """Run the app until it quits."""
+        await self._app.run_async()
+
+    async def _on_mount(self) -> None:
+        logger.remove()
+        await self._app.handle_status("connected", f"replay {self._path}")
+        self._task = asyncio.create_task(self._replay())
+
+    async def _on_shutdown(self) -> None:
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        logger.add(sys.stderr)
+
+    async def _replay(self) -> None:
         try:
-            self._ws = await websockets.connect(self._url)
-            self._receiver_task = asyncio.create_task(self._receiver_task_handler())
-        except Exception as e:
-            logger.error(f"Unable to connect to {self._url}: {e}")
-            await self._app.handle_system_status("ERROR")
-
-    async def _disconnect(self):
-        """Disconnect from the observer."""
-        if self._ws:
-            await self._ws.close()
-        if self._receiver_task:
-            await self._receiver_task
-
-    async def _receiver_task_handler(self):
-        """Receive messages and forward to the app."""
-        async for raw_message in self._ws:
-            message = json.loads(raw_message)
-            await self._app.handle_message(message)
-        await self._app.clear()
+            async for message in replay_session(self._path, speed=self._speed):
+                await self._app.handle_message(message)
+        except FileNotFoundError:
+            await self._app.handle_status("error", f"no such file: {self._path}")
+            return
+        await self._app.handle_status("disconnected", "replay finished")
 
 
 def version_callback(value: bool):
-    """Print version and exit."""
+    """Print the version and exit."""
     if value:
         from pipecat_tail.__version__ import version
 
         typer.echo(f"ᓚᘏᗢ Pipecat Tail Version: {typer.style(version, fg=typer.colors.GREEN)}")
         raise typer.Exit()
-
-
-def url_callback(url: str):
-    """Run Pipecat Tail standalone application."""
-    app = PipecatTail(url=url)
-    asyncio.run(app.run())
 
 
 entrypoint_cli_typer = typer.Typer(
@@ -130,13 +134,34 @@ entrypoint_cli_typer = typer.Typer(
 def cli(
     ctx: typer.Context,
     _version: bool = typer.Option(None, "--version", callback=version_callback, help="CLI version"),
-    _url: str = typer.Option(
-        DEFAULT_URL,
-        "-u",
-        "--url",
-        callback=url_callback,
-        help="URL for the Tail observer",
+    url: str = typer.Option(DEFAULT_URL, "-u", "--url", help="URL of the Tail server"),
+    save: Optional[str] = typer.Option(
+        None, "-s", "--save", help="Record the session to this JSON Lines file"
+    ),
+    replay: Optional[str] = typer.Option(
+        None, "-r", "--replay", help="Replay a recorded session file instead of connecting"
+    ),
+    speed: float = typer.Option(
+        1.0, "--speed", help="Replay speed multiplier (0 loads everything at once)"
     ),
 ):
     """Pipecat Tail command."""
-    pass
+    if ctx.invoked_subcommand is not None:
+        return
+    if replay:
+        app = PipecatTailReplay(path=replay, speed=speed)
+    else:
+        app = PipecatTail(url=url, save=save)
+    asyncio.run(app.run())
+
+
+@entrypoint_cli_typer.command("setup-file")
+def setup_file():
+    """Print the path to pass in PIPECAT_SETUP_FILES."""
+    import pipecat_tail.setup
+
+    typer.echo(pipecat_tail.setup.__file__)
+
+
+if __name__ == "__main__":
+    entrypoint_cli_typer()

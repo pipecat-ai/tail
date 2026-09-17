@@ -4,11 +4,20 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Runner integration for launching the Tail TUI alongside a Pipeline.
+"""Runner integration for launching the Tail app alongside a pipeline.
 
-This module provides a ``TailRunner`` that runs a Pipecat ``PipelineTask`` and
-the Tail Textual UI in parallel. Messages are passed through a ``multiprocessing
-Queue`` to decouple the pipeline process from the UI process.
+``TailRunner`` is a ``WorkerRunner`` that runs the Tail app in a separate
+process and feeds it from a ``TailServer`` worker through a multiprocessing
+queue. Every ``PipelineWorker`` added to the runner gets a ``TailObserver``
+automatically::
+
+    runner = TailRunner()
+    await runner.add_workers(bot)
+    await runner.run()
+
+The pipeline process keeps running until the pipeline finishes or the app is
+closed. When the pipeline finishes first, the app stays open so the session
+can still be read; quitting it returns from ``run()``.
 """
 
 import asyncio
@@ -18,60 +27,30 @@ from multiprocessing import Process, Queue
 from typing import Optional
 
 from loguru import logger
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIObserverParams
-from pydantic import BaseModel
+from pipecat.pipeline.worker import PipelineWorker
+from pipecat.workers.base_worker import BaseWorker
+from pipecat.workers.runner import WorkerRunner
 
-from pipecat_tail.app import TailApp
-from pipecat_tail.rtvi import RTVITailPipelineFinishedMessage, RTVITailReadyMessage
-
-
-class TailRunnerObserver(RTVIObserver):
-    """RTVI observer that forwards messages to a multiprocessing queue."""
-
-    def __init__(self, queue: Queue):
-        """Initialize the observer.
-
-        Args:
-            queue: The queue used to send serialized messages to the UI process.
-        """
-        # This will initialize the Tail logger which send system logs.
-        super().__init__(
-            params=RTVIObserverParams(
-                user_audio_level_enabled=True,
-                bot_audio_level_enabled=True,
-                system_logs_enabled=True,
-            )
-        )
-        self._queue = queue
-
-    async def send_rtvi_message(self, model: BaseModel, exclude_none: bool = True):
-        """Serialize and forward an RTVI message to the queue.
-
-        Args:
-            model: Pydantic model to serialize.
-            exclude_none: Whether to exclude ``None`` fields during serialization.
-        """
-        message = model.model_dump(exclude_none=exclude_none)
-        self._queue.put(message)
+from pipecat_tail.server import TailServer
+from pipecat_tail.sink import QueueSink
 
 
 class TailAppProcess:
-    """This class launches Tail dashboard in a separate process.
+    """Runs the Tail app in a separate process fed by a queue.
 
-    We need to make sure this class doesn't contain anything that can't be
-    pickled before starting the process.
+    Nothing in this class may hold references that cannot be pickled before
+    the process starts.
     """
 
     def __init__(self, queue: Queue):
-        """Initialize the process class.
+        """Initialize the process wrapper.
 
         Args:
-            queue: The queue to communicate with the process.
+            queue: Queue the app reads messages from. ``None`` ends the app.
         """
         self._queue = queue
-        self._app_process_task = None
+        self._app = None
+        self._reader_task: Optional[asyncio.Task] = None
 
     def run(self):
         """Launch the app in a separate process and wait for it to exit."""
@@ -80,110 +59,109 @@ class TailAppProcess:
         process.join()
 
     def _app_process(self):
-        """Create and run the app asynchronously."""
-        # Make sure out standard file descriptors are those of the parent process.
+        # Make sure our standard file descriptors are those of the parent.
         sys.__stdin__ = os.fdopen(0, "r", buffering=1)
         sys.__stdout__ = os.fdopen(1, "w", buffering=1)
         sys.__stderr__ = os.fdopen(2, "w", buffering=1)
-        self._app = TailApp(on_mount=self._app_on_mount, on_shutdown=self._app_on_shutdown)
+
+        from pipecat_tail.app import TailApp
+
+        self._app = TailApp(on_mount=self._on_mount, on_shutdown=self._on_shutdown)
         asyncio.run(self._app.run_async())
 
-    async def _app_on_mount(self):
-        """Hook called when the app mounts to start queue processing."""
-        self._app_process_task = asyncio.create_task(self._app_process_queue())
+    async def _on_mount(self):
+        self._reader_task = asyncio.create_task(self._read_queue())
 
-    async def _app_on_shutdown(self):
-        """Hook called on app shutdown to stop the queue processor and join it."""
-        # Tell the process to finish.
-        self._queue.put(None)
-        if self._app_process_task:
-            await self._app_process_task
-            self._app_process_task = None
+    async def _on_shutdown(self):
+        if self._reader_task and not self._reader_task.done():
+            self._reader_task.cancel()
+            try:
+                await self._reader_task
+            except asyncio.CancelledError:
+                pass
+        self._reader_task = None
 
-    async def _app_process_queue(self):
-        """Consume queue messages and forward them to the app."""
+    async def _read_queue(self):
         loop = asyncio.get_running_loop()
-
-        running = True
-        while running:
+        while True:
             message = await loop.run_in_executor(None, self._queue.get)
-
-            if message and self._app:
+            if message is None:
+                break
+            if self._app:
                 await self._app.handle_message(message)
 
-            running = bool(message)
 
-        if self._app and self._app.is_running:
-            self._app.exit()
+class TailRunner(WorkerRunner):
+    """Worker runner that shows the Tail app while the pipeline runs.
 
-
-class TailRunner(PipelineRunner):
-    """Pipeline runner that launches Tail dashboard in a separate process."""
+    Args:
+        name: Optional runner name.
+        handle_sigint: Whether the runner handles SIGINT. Off by default: the
+            app owns the terminal and Ctrl-C is handled there.
+        handle_sigterm: Whether the runner handles SIGTERM.
+        **kwargs: Passed to ``WorkerRunner``.
+    """
 
     def __init__(
         self,
         *,
         name: Optional[str] = None,
-        force_gc: bool = False,
+        handle_sigint: bool = False,
+        handle_sigterm: bool = False,
         **kwargs,
     ):
-        """Initialize the runner.
+        """Initialize the runner. See the class docstring for the arguments."""
+        super().__init__(
+            name=name, handle_sigint=handle_sigint, handle_sigterm=handle_sigterm, **kwargs
+        )
+        self._queue: Queue = Queue()
+        self._server = TailServer(sink=QueueSink(self._queue), auto_stop=True)
+        self._server_added = False
+
+    @property
+    def server(self) -> TailServer:
+        """The Tail server worker feeding the app."""
+        return self._server
+
+    async def add_workers(self, *workers: BaseWorker) -> None:
+        """Register workers, attaching a Tail observer to each pipeline worker."""
+        for worker in workers:
+            if isinstance(worker, PipelineWorker):
+                worker.add_observer(self._server.create_observer(worker))
+        await super().add_workers(*workers)
+
+    async def run(self, worker: Optional[BaseWorker] = None, *, auto_end: bool = True) -> None:
+        """Run the workers and the Tail app until either finishes.
 
         Args:
-            name: Optional runner name.
-            force_gc: Whether to force garbage collection between iterations.
-            **kwargs: Additional keyword args passed to ``PipelineRunner``.
+            worker: Deprecated. A worker to add before running; prefer
+                ``add_workers()``.
+            auto_end: End when every root worker has finished.
         """
-        super().__init__(name=name, handle_sigint=False, handle_sigterm=False, force_gc=force_gc)
-        self._queue = Queue()
-        self._app = None
+        if worker is not None:
+            await self.add_workers(worker)
+        if not self._server_added:
+            self._server_added = True
+            await self.add_workers(self._server)
 
-    async def run(self, task: PipelineTask):
-        """Run the pipeline and Tail dashboard concurrently.
-
-        Sends an initial ``tail-ready`` message, attaches an observer that
-        forwards RTVI messages to the Tail dashboard, and waits until either the
-        app or pipeline completes, then performs a graceful shutdown.
-
-        Args:
-            task: The pipeline task to execute.
-        """
-        # Inform the client about our setup.
-        await self._app_send_rtvi_message(RTVITailReadyMessage())
-
-        # Remove default logger before adding the observer.
+        # The app owns the terminal, so stop writing logs to it.
         logger.remove()
 
-        # Add the observer. This will send RTVI messages (including system logs).
-        task.add_observer(TailRunnerObserver(self._queue))
-
         app_task = asyncio.create_task(asyncio.to_thread(self._app_thread))
-        pipeline_task = asyncio.create_task(super().run(task))
-        _, pending = await asyncio.wait(
-            [app_task, pipeline_task], return_when=asyncio.FIRST_COMPLETED
-        )
-
-        # It doesn't matter if we try to cancel a task that is already finished,
-        # so we just always do it.
-        await task.cancel()
-
-        # Always let the user finish the app.
-        if app_task in pending:
-            await self._app_send_rtvi_message(RTVITailPipelineFinishedMessage())
-            await app_task
-
-        # Re-add default logger.
-        logger.add(sys.stderr)
+        run_task = asyncio.create_task(super().run(auto_end=auto_end))
+        try:
+            _, pending = await asyncio.wait(
+                [app_task, run_task], return_when=asyncio.FIRST_COMPLETED
+            )
+            if run_task in pending:
+                await self.cancel(reason="Tail closed")
+                await run_task
+            if app_task in pending:
+                # Let the user finish reading the session.
+                await app_task
+        finally:
+            self._queue.put(None)
+            logger.add(sys.stderr)
 
     def _app_thread(self):
-        """Launch the app."""
-        app = TailAppProcess(self._queue)
-        app.run()
-
-    async def _app_send_rtvi_message(self, message: BaseModel):
-        """Send an RTVI message to the app.
-
-        Args:
-            message: RTVI message to send.
-        """
-        self._queue.put(message.model_dump(exclude_none=True))
+        TailAppProcess(self._queue).run()
