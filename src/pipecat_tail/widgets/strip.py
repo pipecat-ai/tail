@@ -7,36 +7,74 @@
 """The always-visible strip under the header and the error banner."""
 
 from rich.text import Text
-from textual.widgets import Static
+from textual.color import Gradient
+from textual.containers import Horizontal
+from textual.widgets import Label, ProgressBar, Static
 
 from pipecat_tail.state import SessionState
 from pipecat_tail.widgets.render import (
-    STYLE_BOT,
+    LEVEL_GRADIENT,
     STYLE_BRIGHT,
     STYLE_DIM,
     STYLE_ERROR,
     STYLE_LABEL,
     STYLE_TEXT,
-    STYLE_USER,
     fmt_clock,
     fmt_int,
     fmt_secs_fixed,
-    level_bar,
     status_dot,
     truncate,
 )
 
 
-class TopStrip(Static):
+class LevelMeter(ProgressBar):
+    """An audio level as a gradient bar, blue when quiet and red when loud."""
+
+    def __init__(self, id: str):
+        """Create the meter."""
+        super().__init__(
+            total=1.0,
+            gradient=Gradient.from_colors(*LEVEL_GRADIENT),
+            show_percentage=False,
+            show_eta=False,
+            id=id,
+        )
+
+    def set_level(self, level: float) -> None:
+        """Move the bar to a level in ``[0, 1]``."""
+        self.update(progress=max(0.0, min(1.0, level)), total=1.0)
+
+
+class TopStrip(Horizontal):
     """One line answering: connected to what, which worker, how is it doing."""
 
     def __init__(self):
         """Create the strip."""
-        super().__init__(Text(""), id="strip")
+        super().__init__(id="strip")
+        self._text = Static(Text(""), id="strip-text")
+        self.user_meter = LevelMeter("user-meter")
+        self.bot_meter = LevelMeter("bot-meter")
+
+    def compose(self):
+        """Compose the text and the two meters."""
+        yield self._text
+        yield Label("user", id="user-label")
+        yield self.user_meter
+        yield Label("bot", id="bot-label")
+        yield self.bot_meter
+
+    @property
+    def content(self):
+        """The text part of the strip, for tests."""
+        return self._text.content
 
     def update_from(self, state: SessionState) -> None:
         """Re-render the strip from the state."""
         session = state.selected
+        self.user_meter.set_level(session.user_level)
+        self.bot_meter.set_level(session.bot_level)
+        self.query_one("#user-label", Label).set_class(session.user_speaking, "speaking")
+        self.query_one("#bot-label", Label).set_class(session.bot_speaking, "speaking")
         text = Text()
         text.append_text(status_dot(state.status))
         text.append(f" {state.status}", style=STYLE_TEXT)
@@ -72,13 +110,7 @@ class TopStrip(Static):
         if session.tts_characters:
             field("tts", f"{fmt_int(session.tts_characters)} ch")
 
-        text.append("   ")
-        text.append("user ", style=STYLE_USER if session.user_speaking else STYLE_LABEL)
-        text.append_text(level_bar(session.user_level))
-        text.append("  ")
-        text.append("bot ", style=STYLE_BOT if session.bot_speaking else STYLE_LABEL)
-        text.append_text(level_bar(session.bot_level))
-        self.update(text)
+        self._text.update(text)
 
 
 class ErrorBanner(Static):

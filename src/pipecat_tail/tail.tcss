@@ -16,6 +16,28 @@ Screen {
     color: $text;
 }
 
+#strip-text {
+    width: 1fr;
+}
+
+#strip Label {
+    color: $text-muted;
+    margin: 0 1;
+}
+
+#strip Label.speaking {
+    color: $text;
+    text-style: bold;
+}
+
+#strip LevelMeter {
+    width: 16;
+}
+
+#strip LevelMeter Bar {
+    width: 16;
+}
+
 #tabs {
     height: 1fr;
 }
