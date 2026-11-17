@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2025, Daily
+# Copyright (c) 2025-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -9,16 +9,17 @@
 Run it with the Pipecat development runner and open the dashboard in the
 same terminal::
 
-    uv run examples/bot.py
+    uv run --group examples examples/bot.py
 
 or keep the bot untouched and attach Tail from outside::
 
-    PIPECAT_SETUP_FILES=$(pipecat tail setup-file) TAIL_RUNNER=0 uv run examples/bot.py
+    PIPECAT_SETUP_FILES=$(pipecat tail setup-file) TAIL_RUNNER=0 \
+        uv run --group examples examples/bot.py
     pipecat tail
 
-Needs DEEPGRAM_API_KEY, OPENAI_API_KEY and CARTESIA_API_KEY in the
-environment or a ``.env`` file, and ``pipecat-ai[webrtc,silero,deepgram,
-openai,cartesia,runner]``.
+The ``examples`` dependency group in ``pyproject.toml`` installs the
+services and transports it uses. Needs DEEPGRAM_API_KEY, OPENAI_API_KEY and
+CARTESIA_API_KEY in the environment or a ``.env`` file.
 """
 
 import os
@@ -26,12 +27,14 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -47,14 +50,10 @@ load_dotenv(override=True)
 
 transport_params = {
     "daily": lambda: DailyParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        audio_in_enabled=True, audio_out_enabled=True, video_in_enabled=True
     ),
     "webrtc": lambda: TransportParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        audio_in_enabled=True, audio_out_enabled=True, video_in_enabled=True
     ),
 }
 
@@ -64,7 +63,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",
+        settings=CartesiaTTSService.Settings(voice="86e30c1d-714b-4074-a1f2-1cb6b552fb49"),
     )
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -78,7 +77,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         },
     ]
     context = LLMContext(messages)
-    context_aggregator = LLMContextAggregatorPair(context)
+    context_aggregator = LLMContextAggregatorPair(
+        context, user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer())
+    )
 
     pipeline = Pipeline(
         [

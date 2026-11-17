@@ -201,11 +201,14 @@ class TailWebSocketServer:
         try:
             self._client = client
             # The ready message goes first, then whatever the first client
-            # missed, all through the send queue so the order holds.
+            # missed, all through the send queue so the order holds. Nothing
+            # is buffered once a client has been seen, or the ready message
+            # would go out twice.
+            first = not self._first_client_seen
+            self._first_client_seen = True
             if self._on_client_connected:
                 await self._on_client_connected()
-            if not self._first_client_seen:
-                self._first_client_seen = True
+            if first:
                 assert self._send_queue
                 for encoded in self._buffer:
                     self._send_queue.put_nowait(encoded)

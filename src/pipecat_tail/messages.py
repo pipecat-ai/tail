@@ -33,7 +33,7 @@ TAIL_LABEL = "tail"
 RTVI_LABEL = "rtvi-ai"
 """Label carried by RTVI messages forwarded from Pipecat."""
 
-PROTOCOL_VERSION = "2"
+PROTOCOL_VERSION = "3"
 """Version of the Tail wire protocol."""
 
 
@@ -55,6 +55,7 @@ def system_info() -> dict[str, str]:
         "tail": _package_version("pipecat-ai-tail"),
         "python": platform.python_version(),
         "platform": platform.platform(),
+        "protocol": PROTOCOL_VERSION,
     }
 
 
@@ -164,17 +165,22 @@ class TailTransportTimingMessage(TailMessage):
     data: dict[str, Any]
 
 
+class TailVADMessage(TailMessage):
+    """The VAD heard the user start or stop speaking.
+
+    The VAD only says so after ``start_secs`` of speech or ``stop_secs`` of
+    silence. ``data`` carries ``speaking``, ``secs`` (the wait it used) and
+    ``at``: when the speech really started or the silence really began.
+    """
+
+    type: Literal["tail-vad"] = "tail-vad"
+    data: dict[str, Any]
+
+
 class TailErrorMessage(TailMessage):
     """Pipecat's ``ErrorEvent`` for an ``ErrorFrame``."""
 
     type: Literal["tail-error"] = "tail-error"
-    data: dict[str, Any]
-
-
-class TailSpeechMessage(TailMessage):
-    """Pipecat's ``SpeechEvent``: raw VAD, turn ruling, bot speech, interruption."""
-
-    type: Literal["tail-speech"] = "tail-speech"
     data: dict[str, Any]
 
 
@@ -196,6 +202,34 @@ class TailServiceUsageMessage(TailMessage):
     """A service usage record: LLM tokens, STT audio seconds or TTS characters."""
 
     type: Literal["tail-service-usage"] = "tail-service-usage"
+    data: dict[str, Any]
+
+
+class TailFlowMessage(TailMessage):
+    """Frames each processor pushed and received over the last interval.
+
+    ``data`` carries ``interval_secs`` and ``processors``, a mapping from
+    processor name to ``{"out": counts, "in": counts}`` where ``counts`` maps a
+    frame kind (``audio``, ``image``, ``system``, ``control`` or ``data``) to
+    the number of frames.
+    """
+
+    type: Literal["tail-flow"] = "tail-flow"
+    data: dict[str, Any]
+
+
+class TailLLMContextMessage(TailMessage):
+    """The context a pipeline sent to its LLM.
+
+    ``data`` carries ``llm`` (the receiving processor), ``messages``,
+    ``roles`` (messages per role), ``characters``, ``images`` and ``tools``
+    (names), plus the messages themselves: ``items`` holds the messages from
+    index ``start`` on, everything before having been sent already (see
+    ``pipecat_tail.context``). ``system`` (the LLM's system instruction) and
+    ``tool_schemas`` come only when they changed.
+    """
+
+    type: Literal["tail-llm-context"] = "tail-llm-context"
     data: dict[str, Any]
 
 

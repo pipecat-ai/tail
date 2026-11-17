@@ -29,6 +29,15 @@ import time
 from typing import Any, Optional
 
 from loguru import logger
+
+try:
+    from pipecat.workers.base_worker import BaseWorker
+except ImportError as e:  # Pipecat before 1.3
+    raise ImportError(
+        "TailServer needs Pipecat 1.3 or later (WorkerRunner and the worker bus). "
+        "With older Pipecat, add a TailObserver to the PipelineTask instead."
+    ) from e
+
 from pipecat.bus.messages import (
     BusActivateWorkerMessage,
     BusAddWorkerMessage,
@@ -61,8 +70,8 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     UserSpeakingFrame,
 )
-from pipecat.workers.base_worker import BaseWorker
 
+from pipecat_tail import compat
 from pipecat_tail.messages import (
     TailBusMessage,
     TailJobMessage,
@@ -175,6 +184,7 @@ class TailServer(BaseWorker):
         self._observed: dict[str, BaseWorker] = {}
         self._pipeline_done: dict[str, asyncio.Event] = {}
         self._registry_snapshot: Optional[dict[str, Any]] = None
+        self._runner_name: Optional[str] = None
         self._watch_task: Optional[asyncio.Task] = None
 
     @property
@@ -218,6 +228,10 @@ class TailServer(BaseWorker):
                 await self._server.start()
             except OSError as e:
                 logger.error(f"ᓚᘏᗢ Tail: unable to start server at {self._server.url}: {e}")
+        else:
+            # A sink reaches the app directly (TailRunner's queue), so there is
+            # no client to wait for: the app hears it is connected right away.
+            await self._on_client_connected()
         self._maybe_watch()
 
     async def stop(self) -> None:
@@ -270,7 +284,7 @@ class TailServer(BaseWorker):
     #
 
     def accepts_bus_message(self, message: BusMessage) -> bool:
-        """Accept every message: Tail observes, it never opts out."""
+        """Accept every message: Tail observes, it never opts out (Pipecat 1.8+)."""
         return True
 
     async def on_bus_message(self, message: BusMessage) -> None:
@@ -318,16 +332,17 @@ class TailServer(BaseWorker):
                 )
             )
         elif isinstance(message, BusWorkerReadyMessage):
+            self._runner_name = getattr(message, "runner", None) or self._runner_name
             await self.emit(
                 TailWorkerReadyMessage(
                     timestamp=now,
                     worker=source,
                     data={
-                        "runner": message.runner,
-                        "parent": message.parent,
-                        "active": message.active,
-                        "bridged": message.bridged,
-                        "started_at": message.started_at,
+                        "runner": getattr(message, "runner", None),
+                        "parent": getattr(message, "parent", None),
+                        "active": getattr(message, "active", None),
+                        "bridged": getattr(message, "bridged", None),
+                        "started_at": getattr(message, "started_at", None),
                     },
                 ).model_dump(mode="json", exclude_none=True)
             )
@@ -383,10 +398,13 @@ class TailServer(BaseWorker):
 
     async def _on_client_connected(self) -> None:
         ready = TailReadyMessage()
+        ready.data["capabilities"] = compat.capabilities()
         try:
             ready.data["runner"] = self.worker_runner.name
-        except RuntimeError:
-            pass
+        except (RuntimeError, AttributeError):
+            # No runner yet, or Pipecat before 1.8.
+            if self._runner_name:
+                ready.data["runner"] = self._runner_name
         await self.emit(ready.model_dump(mode="json", exclude_none=True))
         if self._registry_snapshot:
             await self.emit(
