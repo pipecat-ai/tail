@@ -11,9 +11,26 @@ which areas changed so the app can refresh only the widgets that show them.
 The model has no Textual dependency, so it can be tested and reused on its
 own.
 
-Per-worker data (conversation, latency, metrics, speech, startup) lives in a
-``WorkerSession``; runner-wide data (workers, jobs, bus traffic, logs, errors)
-lives on ``SessionState`` itself.
+Per-worker data (conversation, latency, metrics, speech, flow, startup) lives
+in a ``WorkerSession``; runner-wide data (workers, jobs, bus traffic, logs,
+errors) lives on ``SessionState`` itself.
+
+The model is built from RTVI first and from Tail's own messages on top, so it
+works with whatever Pipecat release the bot runs:
+
+- What the user said comes from ``user-input`` (Pipecat 1.13+) or
+  ``user-transcription`` before that. Whichever arrives first for a worker
+  wins, so a bot that sends both is not counted twice.
+- The LLM's raw text comes from ``llm-raw-text`` or ``bot-llm-text``, the
+  spoken text from ``bot-output``, with ``tts-raw-text`` or ``bot-tts-text``
+  as the fallback.
+- Speech lanes come from the RTVI speaking messages; raw VAD from
+  ``vad-user-*`` (1.8+).
+- Metrics and function calls come from Tail's observers when the bot's
+  Pipecat has them (1.9+), and from RTVI ``metrics`` and
+  ``llm-function-call-*`` otherwise.
+- Latency breakdowns without ``contributions`` (before 1.9) are turned into
+  contributions from their TTFB, aggregation and function call timings.
 """
 
 import datetime
@@ -29,6 +46,25 @@ MAX_BUS = 2000
 MAX_SPEECH_EVENTS = 2000
 MAX_METRIC_POINTS = 500
 MAX_LEVELS = 10
+MAX_WAVE = 1500
+MAX_FLOW_HISTORY = 40
+MAX_EVENTS = 6000
+BARGE_IN_GRACE_SECS = 0.5
+"""An interruption this soon after the bot stopped speaking still cut it off."""
+EARLY_END_SECS = 1.5
+"""A user who goes on this soon after their turn was ended, before the bot said
+anything, had not finished: the turn ended early."""
+
+# Messages too frequent or too large to keep in the per-session event log.
+UNLOGGED_EVENTS = frozenset(
+    {"user-audio-level", "bot-audio-level", "tail-flow", "tail-log", "tail-bus", "tail-workers"}
+)
+WAITING_GIVE_UP_SECS = 30.0
+UNHEARD_ANSWER_SECS = 2.0
+"""How soon after a user turn ended with nothing heard the bot has to take it
+up for Tail to count the wait for it: Pipecat answers such a turn right away
+when it does (or a speech-to-speech service a moment later). The LLM starting
+later is the bot speaking on its own, such as after the user went idle."""
 
 Area = str
 CONVERSATION: Area = "conversation"
@@ -42,6 +78,20 @@ BUS: Area = "bus"
 JOBS: Area = "jobs"
 STARTUP: Area = "startup"
 STATUS: Area = "status"
+VOICE: Area = "voice"
+FLOW: Area = "flow"
+
+WAIT_PHASES = ("end of turn", "waiting", "llm", "tool", "first sentence", "tts")
+"""Where a wait for the bot goes, in the order they usually happen."""
+
+LISTENING = "listening"
+THINKING = "thinking"
+SPEAKING = "speaking"
+IDLE = "idle"
+
+
+def _number(value: Any) -> Optional[float]:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
 @dataclass
@@ -64,6 +114,15 @@ class FunctionCall:
         return self.kind not in ("function_call_started", "function_call_in_progress")
 
     @property
+    def failed(self) -> bool:
+        """Whether the call failed, timed out or was cancelled."""
+        return self.kind in (
+            "function_call_failed",
+            "function_call_timed_out",
+            "function_call_cancelled",
+        ) or bool(self.error)
+
+    @property
     def duration_secs(self) -> Optional[float]:
         """Wall time from the call starting to it settling, if both are known."""
         start = self.in_progress_at or self.started_at
@@ -74,7 +133,12 @@ class FunctionCall:
 
 @dataclass
 class Segment:
-    """A piece of bot output the TTS will speak, with its spoken progress."""
+    """A piece of bot output, with its spoken progress.
+
+    ``deliveries`` records where the delivery changes, as ``(offset, tags)``
+    pairs: from ``offset`` characters into the text, the words are spoken
+    with ``tags`` (for example ``("warm",)``), until the next pair.
+    """
 
     segment_id: Any
     text: str
@@ -82,10 +146,14 @@ class Segment:
     spoken_status: Optional[str] = None
     accumulated: str = ""
     remaining: str = ""
+    output_type: Optional[str] = None
+    deliveries: list[tuple[int, tuple[str, ...]]] = field(default_factory=list)
 
     @property
     def spoken_text(self) -> str:
         """The part of the segment that has been spoken."""
+        if not self.will_be_spoken:
+            return self.text
         if self.spoken_status == "completed":
             return self.text
         if self.spoken_status == "in-progress":
@@ -95,11 +163,55 @@ class Segment:
     @property
     def unspoken_text(self) -> str:
         """The part of the segment that has not been spoken yet."""
-        if self.spoken_status == "completed":
+        if not self.will_be_spoken or self.spoken_status == "completed":
             return ""
         if self.spoken_status == "in-progress":
             return self.remaining
         return self.text
+
+    def set_delivery(self, offset: int, tags: tuple[str, ...]) -> None:
+        """Record the delivery of the words from ``offset`` on."""
+        current = self.deliveries[-1][1] if self.deliveries else ()
+        if tags == current:
+            return
+        if self.deliveries and self.deliveries[-1][0] >= offset:
+            self.deliveries[-1] = (self.deliveries[-1][0], tags)
+            if len(self.deliveries) > 1 and self.deliveries[-2][1] == tags:
+                self.deliveries.pop()
+            return
+        self.deliveries.append((offset, tags))
+
+
+@dataclass
+class EarlyEnd:
+    """Pipecat ended the user's turn, and the user went on before the bot spoke.
+
+    The LLM usually starts on what it heard, gets cancelled when the user
+    goes on, and then gets what came next as another message.
+    """
+
+    ruled_at: float
+    """When Pipecat ended the turn."""
+    resumed_at: float
+    """When the user started speaking again, as near as Tail can tell."""
+    heard: str
+    """What Pipecat had of the turn when it ended it."""
+    llm_started: bool
+    """Whether the LLM had started on it."""
+
+    @property
+    def gap_secs(self) -> float:
+        """How long after the turn ended the user went on."""
+        return max(0.0, self.resumed_at - self.ruled_at)
+
+
+@dataclass
+class Backchannel:
+    """A short acknowledgment said while the other side talks, such as "mhm"."""
+
+    who: str
+    text: str
+    timestamp: float
 
 
 @dataclass
@@ -110,18 +222,43 @@ class Turn:
     started_at: float
     user_text: str = ""
     user_interim: str = ""
-    user_llm_text: Optional[str] = None
+    user_llm_texts: list[str] = field(default_factory=list)
+    """Each user message the LLM got during the turn, in order."""
+    input_type: str = "transcription"
+    perception: list[dict[str, Any]] = field(default_factory=list)
+    speaker: Optional[str] = None
     llm_text: str = ""
     tts_text: str = ""
     segments: list[Segment] = field(default_factory=list)
     consumed: int = 0
     function_calls: list[FunctionCall] = field(default_factory=list)
+    backchannels: list[Backchannel] = field(default_factory=list)
+    early_ends: list[EarlyEnd] = field(default_factory=list)
+    marker: Optional[dict[str, Any]] = None
+    context: Optional[dict[str, Any]] = None
     interrupted: bool = False
     interrupted_at: Optional[float] = None
     latency_secs: Optional[float] = None
+    latency: Optional["LatencyRecord"] = None
+    user_stopped_at: Optional[float] = None
+    bot_started_at: Optional[float] = None
     ended: bool = False
     duration_secs: Optional[float] = None
     provisional: bool = True
+    opened_at: Optional[float] = None
+    context_items: Optional[list[dict[str, Any]]] = None
+    context_system: Optional[str] = None
+    context_tools: Optional[list[dict[str, Any]]] = None
+    context_new_from: Optional[int] = None
+    restarted_at: Optional[float] = None
+    """When the user started the turn over, on the bot's clock: its first part
+    ended with nothing heard, and the bot didn't take it up."""
+
+    def restart(self, timestamp: float) -> None:
+        """Start the turn over from ``timestamp``: nothing before it counts."""
+        self.started_at = time.time()
+        self.restarted_at = timestamp
+        self.user_stopped_at = None
 
     @property
     def has_bot_content(self) -> bool:
@@ -129,9 +266,28 @@ class Turn:
         return bool(self.llm_text or self.tts_text or self.segments or self.function_calls)
 
     @property
+    def has_user_content(self) -> bool:
+        """Whether any words from the user reached Tail in this turn."""
+        return bool(self.user_text or self.user_interim or self.user_llm_texts)
+
+    @property
     def has_content(self) -> bool:
         """Whether anything at all happened in this turn."""
         return bool(self.user_text or self.user_interim or self.has_bot_content)
+
+    @property
+    def user_llm_parts(self) -> list[str]:
+        """What the LLM got from the user, when it isn't simply what was heard.
+
+        Empty when the LLM got the transcription as it was. More than one
+        part means Pipecat ended the user's turn at a pause, the LLM started
+        on what had been said so far, and the user went on: the rest reached
+        it as another message.
+        """
+        parts = self.user_llm_texts
+        if len(parts) == 1 and parts[0].strip() == self.user_text.strip():
+            return []
+        return parts
 
     @property
     def pending_text(self) -> str:
@@ -149,6 +305,18 @@ class Turn:
         for call in self.function_calls:
             if call.tool_call_id == tool_call_id:
                 return call
+        return None
+
+    @property
+    def tone(self) -> Optional[tuple[str, float]]:
+        """The likeliest tone the user spoke in, with its confidence, if read."""
+        for signal in self.perception:
+            labels = signal.get("labels") or []
+            if labels and isinstance(labels[0], dict):
+                label = labels[0].get("label")
+                confidence = _number(labels[0].get("confidence")) or 0.0
+                if isinstance(label, str):
+                    return label, confidence
         return None
 
 
@@ -173,6 +341,8 @@ class SpeechEvent:
     kind: str
     timestamp: float
     started_at: Optional[float] = None
+    heard: bool = True
+    """For a user turn end: whether any of the user's words had been heard."""
 
 
 @dataclass
@@ -225,6 +395,26 @@ class UsageTotals:
         audio = record.get("audio_seconds")
         if isinstance(audio, (int, float)):
             self.audio_seconds += float(audio)
+
+
+@dataclass
+class FlowStats:
+    """Frames a processor pushed and received, as rates per second."""
+
+    out_rates: dict[str, float] = field(default_factory=dict)
+    in_rates: dict[str, float] = field(default_factory=dict)
+    history: Deque[float] = field(default_factory=lambda: deque(maxlen=MAX_FLOW_HISTORY))
+    updated_at: float = 0.0
+
+    @property
+    def out_total(self) -> float:
+        """Frames per second pushed, of every kind."""
+        return sum(self.out_rates.values())
+
+    @property
+    def in_total(self) -> float:
+        """Frames per second received, of every kind."""
+        return sum(self.in_rates.values())
 
 
 @dataclass
@@ -329,14 +519,99 @@ class WorkerSession:
         self.usage: dict[tuple[str, str], UsageTotals] = {}
         self.startup: Optional[dict[str, Any]] = None
         self.transport_timing: Optional[dict[str, Any]] = None
+        self.capabilities: set[str] = set()
+        self.processors: list[str] = []
+        self.flow: dict[str, FlowStats] = {}
+        self.context: Optional[dict[str, Any]] = None
+        self.context_items: list[dict[str, Any]] = []
+        self.system_instruction: Optional[str] = None
+        self.tool_schemas: list[dict[str, Any]] = []
+        self.events: Deque[tuple[float, str, dict[str, Any]]] = deque(maxlen=MAX_EVENTS)
         self.user_speaking = False
         self.bot_speaking = False
+        self.user_muted = False
+        self.llm_active = False
+        self.tts_active = False
+        self.waiting_since: Optional[float] = None
+        # The latest wait for the bot, from the user going silent to the
+        # bot's first words, kept after it ends until the next one starts.
+        self.wait_started_at: Optional[float] = None
+        self.wait_ruled_at: Optional[float] = None
+        self.wait_ended_at: Optional[float] = None
+        self.wait_marks: list[tuple[float, str]] = []
+        # A user turn that ended with nothing heard, as (went silent, ended),
+        # until the bot shows it's answering it.
+        self.unheard_stop: Optional[tuple[float, float]] = None
+        # How long the VAD waits in silence before saying the user stopped
+        # (its stop_secs), learned from Pipecat's measured breakdowns.
+        self.endpointing_secs: Optional[float] = None
+        # The latest turn end, to tell when the user went on before the bot spoke.
+        self.ruled_at: Optional[float] = None
+        self.ruled_turn: Optional[Turn] = None
+        self.bot_spoke_since_ruling = False
+        self.last_vad_stop: Optional[float] = None
+        self.last_bot_stop: Optional[float] = None
         self.user_level = 0.0
         self.bot_level = 0.0
         self.user_levels: Deque[float] = deque([0.0] * MAX_LEVELS, maxlen=MAX_LEVELS)
         self.bot_levels: Deque[float] = deque([0.0] * MAX_LEVELS, maxlen=MAX_LEVELS)
+        self.user_wave: Deque[tuple[float, float]] = deque(maxlen=MAX_WAVE)
+        self.bot_wave: Deque[tuple[float, float]] = deque(maxlen=MAX_WAVE)
+        self.started_at: Optional[float] = None
         self.finished = False
         self.next_turn_number = 1
+        self.interruptions = 0
+        # Which message families this worker sends, so that a bot sending both
+        # an old and a new message for the same thing is counted once.
+        self.has_user_input = False
+        self.has_llm_raw = False
+        self.has_tail_vad = False
+        self.has_tts_raw = False
+        self.has_observer_metrics = False
+        self.has_observer_function_calls = False
+
+    # State
+
+    @property
+    def bot_state(self) -> str:
+        """What the bot is doing: ``listening``, ``thinking``, ``speaking`` or ``idle``."""
+        return self.bot_state_at(time.time())
+
+    def bot_state_at(self, now: float) -> str:
+        """What the bot is doing at ``now``, on the bot's clock."""
+        if self.finished:
+            return IDLE
+        if self.bot_speaking:
+            return SPEAKING
+        if self.waiting_since is not None and now - self.waiting_since > WAITING_GIVE_UP_SECS:
+            # The bot never answered; stop counting.
+            self.waiting_since = None
+        if self.llm_active or self.waiting_since is not None:
+            return THINKING
+        return LISTENING
+
+    def is_active(self, now: float) -> bool:
+        """Whether anything is happening that the screen should follow closely.
+
+        Someone speaking or about to, the bot thinking, audio in the last
+        moments or a tool call running.
+        """
+        if self.finished:
+            return False
+        if self.user_speaking or self.bot_speaking or self.llm_active or self.tts_active:
+            return True
+        if self.waiting_since is not None:
+            return True
+        if self.user_level > 0.01 or self.bot_level > 0.01:
+            return True
+        for wave in (self.user_wave, self.bot_wave):
+            for t, level in reversed(wave):
+                if now - t > 2.0:
+                    break
+                if level > 0.01:
+                    return True
+        turn = self.current_turn
+        return bool(turn and any(not c.settled for c in turn.function_calls))
 
     # Turns
 
@@ -379,15 +654,31 @@ class WorkerSession:
         turn.provisional = False
         return turn
 
-    def end_turn(self, number: int, duration: Optional[float], was_interrupted: bool) -> None:
+    def end_turn(
+        self,
+        number: int,
+        duration: Optional[float],
+        was_interrupted: bool,
+        timestamp: Optional[float] = None,
+    ) -> None:
         """Handle a turn-ended event from the turn tracking observer."""
         for turn in reversed(self.turns):
             if turn.number == number:
                 turn.ended = True
+                if turn.restarted_at is not None and timestamp is not None:
+                    # Pipecat counts from the part with nothing heard.
+                    duration = max(0.0, timestamp - turn.restarted_at)
                 turn.duration_secs = duration
                 if was_interrupted and turn.has_bot_content:
                     turn.interrupted = True
                 return
+
+    def turn_by_number(self, number: Optional[int]) -> Optional[Turn]:
+        """Find a turn by its number."""
+        for turn in reversed(self.turns):
+            if turn.number == number:
+                return turn
+        return None
 
     # Metrics
 
@@ -405,6 +696,11 @@ class WorkerSession:
         )
         totals.add(record)
 
+    def last_metric(self, processor: str, kind: str = "ttfb") -> Optional[MetricPoint]:
+        """The latest measurement of a service, if any."""
+        series = self.metrics.get((processor, kind))
+        return series[-1] if series else None
+
     # Totals for the strip
 
     @property
@@ -418,14 +714,141 @@ class WorkerSession:
         return sum(u.completion_tokens for u in self.usage.values() if u.kind == "llm")
 
     @property
+    def cached_tokens(self) -> int:
+        """Prompt tokens read from the provider's cache, by every LLM service."""
+        return sum(u.cache_read_input_tokens for u in self.usage.values() if u.kind == "llm")
+
+    @property
     def tts_characters(self) -> int:
         """Characters synthesized by every TTS service."""
         return sum(u.characters for u in self.usage.values() if u.kind == "tts")
 
     @property
+    def stt_seconds(self) -> float:
+        """Audio seconds transcribed by every STT service."""
+        return sum(u.audio_seconds for u in self.usage.values() if u.kind == "stt")
+
+    @property
+    def llm_model(self) -> Optional[str]:
+        """The model of the most used LLM service, if reported."""
+        llms = [u for u in self.usage.values() if u.kind == "llm" and u.model]
+        if llms:
+            return max(llms, key=lambda u: u.count).model
+        for (processor, kind), series in self.metrics.items():
+            if "LLM" in processor and series and series[-1].model:
+                return series[-1].model
+        return None
+
+    @property
     def last_latency(self) -> Optional[LatencyRecord]:
         """The most recent latency record."""
         return self.latencies[-1] if self.latencies else None
+
+    @property
+    def backchannel_count(self) -> int:
+        """Backchannels the user said in this session."""
+        return sum(1 for turn in self.turns for b in turn.backchannels if b.who == "user")
+
+    @property
+    def early_end_count(self) -> int:
+        """User turns Pipecat ended before the user had finished."""
+        return sum(len(turn.early_ends) for turn in self.turns)
+
+    def reset_activity(self) -> None:
+        """Forget what is happening right now, for example after a disconnect."""
+        self.user_speaking = False
+        self.bot_speaking = False
+        self.llm_active = False
+        self.tts_active = False
+        self.waiting_since = None
+        self.unheard_stop = None
+        if self.wait_ended_at is None:
+            self.wait_started_at = None
+        self.user_level = 0.0
+        self.bot_level = 0.0
+
+    # The wait for the bot
+
+    def start_wait(self, stopped: float, ruled: float) -> None:
+        """Start waiting for the bot: the user went silent and their turn ended."""
+        self.waiting_since = stopped
+        self.wait_started_at = stopped
+        self.wait_ruled_at = ruled
+        self.wait_ended_at = None
+        self.wait_marks = []
+        if self.llm_active:
+            self.wait_marks.append((ruled, "llm"))
+
+    def take_up_unheard(self, timestamp: float) -> None:
+        """Start the wait for a turn that ended with nothing heard, now the bot answers it.
+
+        Pipecat leaves such a turn unanswered unless it cut the bot off, so
+        the wait only starts once the bot shows it's answering: the LLM
+        starts, words turn up late, or the bot speaks. It counts from when the
+        user went silent, like any other.
+        """
+        unheard, self.unheard_stop = self.unheard_stop, None
+        if unheard is None or self.waiting_since is not None:
+            return
+        stopped, ruled = unheard
+        if timestamp - ruled <= UNHEARD_ANSWER_SECS:
+            self.start_wait(stopped, ruled)
+
+    def mark_wait(self, timestamp: float, phase: str, *, once: bool = False) -> None:
+        """Note that the bot moved to a phase while the user waits for it.
+
+        Args:
+            timestamp: When the phase started, on the bot's clock.
+            phase: One of ``WAIT_PHASES``.
+            once: Ignore it if the phase was already reached in this wait.
+        """
+        if self.waiting_since is None or self.wait_started_at is None:
+            return
+        if once and any(name == phase for _, name in self.wait_marks):
+            return
+        self.wait_marks.append((timestamp, phase))
+
+    def wait_phases(self, now: float) -> list[tuple[str, float, float]]:
+        """Where the latest wait for the bot went, as ``(phase, start, end)``.
+
+        From the user going silent until now while the bot thinks, or until
+        its first words once it speaks. Empty when the user went on before
+        the bot answered, or when there was no wait yet. Phases come from
+        what Pipecat reports starting: the end of the turn, the LLM, tool
+        calls, the first sentence and speech synthesis.
+        """
+        start = self.wait_started_at
+        if start is None or (self.waiting_since is None and self.wait_ended_at is None):
+            return []
+        end = self.wait_ended_at if self.wait_ended_at is not None else max(now, start)
+        marks = list(self.wait_marks)
+        turn = self.current_turn
+        for call in turn.function_calls if turn else []:
+            if call.started_at is not None and call.started_at >= start:
+                marks.append((call.started_at, "tool"))
+                if call.settled_at is not None:
+                    marks.append((call.settled_at, "llm"))
+        marks.sort(key=lambda mark: mark[0])
+        phases: list[tuple[str, float, float]] = []
+
+        def add(phase: str, a: float, b: float) -> None:
+            if b <= a:
+                return
+            if phases and phases[-1][0] == phase:
+                phases[-1] = (phase, phases[-1][1], b)
+            else:
+                phases.append((phase, a, b))
+
+        ruled = self.wait_ruled_at if self.wait_ruled_at is not None else start
+        ruled = min(max(ruled, start), end)
+        add("end of turn", start, ruled)
+        cursor, phase = ruled, "waiting"
+        for t, name in marks:
+            t = min(max(t, cursor), end)
+            add(phase, cursor, t)
+            cursor, phase = t, name
+        add(phase, cursor, end)
+        return phases
 
 
 class SessionState:
@@ -437,6 +860,8 @@ class SessionState:
         self.runner: Optional[str] = None
         self.status: str = "disconnected"
         self.status_detail: Optional[str] = None
+        self.connected_at: Optional[float] = None
+        self.disconnected_at: Optional[float] = None
         self.workers: dict[str, WorkerInfo] = {}
         self.sessions: dict[Optional[str], WorkerSession] = {}
         self.selected_worker: Optional[str] = None
@@ -445,6 +870,8 @@ class SessionState:
         self.bus: Deque[BusRecord] = deque(maxlen=MAX_BUS)
         self.jobs: dict[str, Job] = {}
         self.messages_seen = 0
+        self.last_message_at: Optional[float] = None
+        self.clock_offset: Optional[float] = None
 
     # Sessions and selection
 
@@ -470,6 +897,11 @@ class SessionState:
         return self.session(None)
 
     @property
+    def has_bot(self) -> bool:
+        """Whether any pipeline has reported anything yet."""
+        return any(s.started_at is not None or s.turns for s in self.sessions.values())
+
+    @property
     def pipeline_workers(self) -> list[str]:
         """Names of workers that have a session, in first-seen order."""
         return [name for name in self.sessions if name is not None]
@@ -493,15 +925,42 @@ class SessionState:
 
     def set_status(self, status: str, detail: Optional[str] = None) -> set[Area]:
         """Update the connection status."""
+        if status == "connected" and self.status != "connected":
+            self.connected_at = time.time()
+        elif status != "connected" and self.status == "connected":
+            self.disconnected_at = time.time()
         self.status = status
         self.status_detail = detail
         if status != "connected":
             for session in self.sessions.values():
-                session.user_speaking = False
-                session.bot_speaking = False
-                session.user_level = 0.0
-                session.bot_level = 0.0
-        return {STATUS, STRIP}
+                session.reset_activity()
+        return {STATUS, STRIP, VOICE}
+
+    def now(self) -> float:
+        """The current time on the bot's clock.
+
+        Message timestamps come from the bot's machine, which may not agree
+        with this one. The offset follows the smallest delay seen, which is
+        the clock difference plus the shortest network trip.
+        """
+        return time.time() - (self.clock_offset or 0.0)
+
+    def _track_clock(self, timestamp: float) -> None:
+        delay = time.time() - timestamp
+        if self.clock_offset is None or delay < self.clock_offset:
+            self.clock_offset = delay
+        else:
+            # Let the offset drift up slowly in case the clocks moved apart.
+            self.clock_offset += 0.0002
+
+    @property
+    def capabilities(self) -> set[str]:
+        """What the bot's Tail observer can report, empty when unknown."""
+        caps = self.info.get("capabilities")
+        selected = self.selected.capabilities
+        if selected:
+            return selected
+        return set(caps) if isinstance(caps, list) else set()
 
     @property
     def active_errors(self) -> list[ErrorRecord]:
@@ -532,47 +991,75 @@ class SessionState:
         worker = worker if isinstance(worker, str) else None
         data = message.get("data")
         data = data if isinstance(data, dict) else {}
+        timestamp = _number(message.get("timestamp"))
+        if timestamp is None:
+            timestamp = self.now()
+        else:
+            self._track_clock(timestamp)
+        self.last_message_at = timestamp
         label = message.get("label")
+        session = self.sessions.get(worker)
+        before = session.current_turn if session is not None else None
         if label == "tail":
-            return self._apply_tail(msg_type, worker, data, message)
-        if label == "rtvi-ai":
-            return self._apply_rtvi(msg_type, worker, data)
-        return set()
+            areas = self._apply_tail(msg_type, worker, data, timestamp)
+        elif label == "rtvi-ai":
+            areas = self._apply_rtvi(msg_type, worker, data, timestamp)
+        else:
+            return set()
+        session = self.sessions.get(worker)
+        if session is not None and msg_type not in UNLOGGED_EVENTS:
+            turn = session.current_turn
+            if turn is not None and turn is not before and turn.opened_at is None:
+                turn.opened_at = timestamp
+            if msg_type == "tail-llm-context":
+                # The context itself is kept on the session and the turn.
+                logged = {
+                    k: v for k, v in data.items() if k not in ("items", "system", "tool_schemas")
+                }
+                logged["new_messages"] = len(data.get("items") or [])
+                session.events.append((timestamp, msg_type, logged))
+            else:
+                session.events.append((timestamp, msg_type, data))
+        return areas
 
     def _apply_tail(
-        self, msg_type: str, worker: Optional[str], data: dict[str, Any], message: dict[str, Any]
+        self, msg_type: str, worker: Optional[str], data: dict[str, Any], timestamp: float
     ) -> set[Area]:
-        timestamp = message.get("timestamp")
-        timestamp = float(timestamp) if isinstance(timestamp, (int, float)) else time.time()
-
         match msg_type:
             case "tail-ready":
                 self.info = dict(data)
                 runner = data.get("runner")
                 self.runner = runner if isinstance(runner, str) else self.runner
+                if self.status != "connected":
+                    self.connected_at = time.time()
                 self.status = "connected"
                 self.status_detail = None
                 return {STATUS, STRIP, WORKERS}
             case "tail-pipeline-started":
                 session = self.session(worker)
                 session.finished = False
+                session.started_at = timestamp
                 processors = data.get("processors")
+                if isinstance(processors, list):
+                    session.processors = [str(p) for p in processors]
+                caps = data.get("capabilities")
+                if isinstance(caps, list):
+                    session.capabilities = {str(c) for c in caps}
                 if worker is not None:
                     info = self.workers.setdefault(worker, WorkerInfo(name=worker))
                     info.status = "running"
+                    if info.started_at is None:
+                        info.started_at = timestamp
                     if isinstance(processors, list):
                         info.processors = [str(p) for p in processors]
-                return {WORKERS, STRIP}
+                return {WORKERS, STRIP, FLOW}
             case "tail-pipeline-finished":
                 session = self.session(worker)
                 session.finished = True
-                session.user_speaking = False
-                session.bot_speaking = False
-                session.user_level = 0.0
-                session.bot_level = 0.0
+                session.reset_activity()
                 if worker is not None and worker in self.workers:
                     self.workers[worker].status = "finished"
-                return {WORKERS, STRIP}
+                return {WORKERS, STRIP, VOICE, FLOW}
             case "tail-turn":
                 session = self.session(worker)
                 number = data.get("turn")
@@ -581,32 +1068,29 @@ class SessionState:
                 if data.get("kind") == "started":
                     session.start_turn(number)
                 else:
-                    duration = data.get("duration_secs")
                     session.end_turn(
                         number,
-                        float(duration) if isinstance(duration, (int, float)) else None,
+                        _number(data.get("duration_secs")),
                         bool(data.get("was_interrupted")),
+                        timestamp,
                     )
                 return {CONVERSATION, STRIP}
-            case "tail-latency":
+            case "tail-vad":
                 session = self.session(worker)
-                latency = data.get("latency_secs", data.get("total_secs", 0.0))
-                record = LatencyRecord(
-                    turn=session.current_turn.number if session.current_turn else None,
-                    latency_secs=float(latency) if isinstance(latency, (int, float)) else 0.0,
-                    total_secs=float(data.get("total_secs", 0.0) or 0.0),
-                    contributions=[c for c in data.get("contributions", []) if isinstance(c, dict)],
-                    first_bot_speech=bool(data.get("first_bot_speech")),
-                    timestamp=timestamp,
-                    ttfb=[t for t in data.get("ttfb", []) if isinstance(t, dict)],
-                    function_calls=[
-                        f for f in data.get("function_calls", []) if isinstance(f, dict)
-                    ],
-                )
-                session.latencies.append(record)
-                if session.current_turn is not None:
-                    session.current_turn.latency_secs = record.latency_secs
-                return {LATENCY, CONVERSATION, STRIP}
+                session.has_tail_vad = True
+                kind = "user_speech_started" if data.get("speaking") else "user_speech_stopped"
+                at = _number(data.get("at"))
+                last = session.speech[-1] if session.speech else None
+                if last is not None and last.kind == kind and abs(last.timestamp - timestamp) < 0.5:
+                    # RTVI's copy of the same event got here first: correct it.
+                    last.started_at = at
+                    if kind == "user_speech_stopped":
+                        session.last_vad_stop = at if at is not None else last.timestamp
+                else:
+                    self._speech(session, kind, timestamp, at)
+                return {VOICE, LATENCY}
+            case "tail-latency":
+                return self._apply_latency(self.session(worker), data, timestamp)
             case "tail-startup":
                 self.session(worker).startup = dict(data)
                 return {STARTUP}
@@ -620,40 +1104,20 @@ class SessionState:
                         category=str(data.get("category", "unknown")),
                         processor=str(data.get("processor", "?")),
                         processor_usable=bool(data.get("processor_usable", True)),
-                        timestamp=float(data.get("timestamp", timestamp) or timestamp),
+                        timestamp=_number(data.get("timestamp")) or timestamp,
                         worker=worker,
                         exception_type=data.get("exception_type"),
                     )
                 )
-                return {ERRORS, LOGS}
-            case "tail-speech":
-                session = self.session(worker)
-                kind = str(data.get("kind", ""))
-                started_at = data.get("started_at")
-                session.speech.append(
-                    SpeechEvent(
-                        kind=kind,
-                        timestamp=float(data.get("timestamp", timestamp) or timestamp),
-                        started_at=float(started_at)
-                        if isinstance(started_at, (int, float))
-                        else None,
-                    )
-                )
-                if kind == "interruption":
-                    turn = session.current_turn
-                    if turn is not None and turn.has_bot_content and not turn.interrupted:
-                        turn.interrupted = True
-                        turn.interrupted_at = timestamp
-                        return {LATENCY, CONVERSATION}
-                return {LATENCY}
+                return {ERRORS, LOGS, STRIP, FLOW}
             case "tail-function-call":
-                return self._apply_function_call(worker, data)
+                self.session(worker).has_observer_function_calls = True
+                return self._apply_function_call(worker, data, timestamp)
             case "tail-service-latency":
                 session = self.session(worker)
-                processor = str(data.get("processor", "?"))
-                kind = str(data.get("kind", "?"))
-                seconds = data.get("seconds")
-                if not isinstance(seconds, (int, float)):
+                session.has_observer_metrics = True
+                seconds = _number(data.get("seconds"))
+                if seconds is None:
                     return set()
                 extra = {
                     k: v
@@ -661,19 +1125,25 @@ class SessionState:
                     if k in ("ttfb_secs", "leading_silence_secs", "thinking_time_secs")
                 }
                 session.add_metric(
-                    processor,
-                    kind,
+                    str(data.get("processor", "?")),
+                    str(data.get("kind", "?")),
                     MetricPoint(
-                        timestamp=float(data.get("timestamp", timestamp) or timestamp),
-                        seconds=float(seconds),
+                        timestamp=_number(data.get("timestamp")) or timestamp,
+                        seconds=seconds,
                         model=data.get("model"),
                         extra=extra,
                     ),
                 )
-                return {METRICS}
+                return {METRICS, FLOW}
             case "tail-service-usage":
-                self.session(worker).add_usage(data)
+                session = self.session(worker)
+                session.has_observer_metrics = True
+                session.add_usage(data)
                 return {METRICS, STRIP}
+            case "tail-flow":
+                return self._apply_flow(self.session(worker), data, timestamp)
+            case "tail-llm-context":
+                return self._apply_llm_context(self.session(worker), data)
             case "tail-log":
                 self.logs.append(
                     LogRecord(
@@ -700,8 +1170,8 @@ class SessionState:
                     info.parent = entry.get("parent")
                     info.active = bool(entry.get("active", info.active))
                     info.bridged = bool(entry.get("bridged", info.bridged))
-                    started = entry.get("started_at")
-                    info.started_at = float(started) if isinstance(started, (int, float)) else None
+                    started = _number(entry.get("started_at"))
+                    info.started_at = started if started is not None else info.started_at
                     if info.status == "known":
                         info.status = "ready"
                 return {WORKERS, STRIP}
@@ -712,9 +1182,12 @@ class SessionState:
                 info.parent = data.get("parent", info.parent)
                 info.active = bool(data.get("active", info.active))
                 info.bridged = bool(data.get("bridged", info.bridged))
-                started = data.get("started_at")
-                if isinstance(started, (int, float)):
-                    info.started_at = float(started)
+                started = _number(data.get("started_at"))
+                if started is not None:
+                    info.started_at = started
+                runner = data.get("runner")
+                if isinstance(runner, str) and not self.runner:
+                    self.runner = runner
                 if info.status in ("known", "ready"):
                     info.status = "ready"
                 return {WORKERS, STRIP}
@@ -745,7 +1218,143 @@ class SessionState:
                 return {BUS}
         return set()
 
-    def _apply_function_call(self, worker: Optional[str], data: dict[str, Any]) -> set[Area]:
+    # Speech
+
+    def _speech(
+        self, session: WorkerSession, kind: str, timestamp: float, started_at: Optional[float]
+    ) -> None:
+        session.speech.append(SpeechEvent(kind=kind, timestamp=timestamp, started_at=started_at))
+        turn = session.current_turn
+        if kind == "user_speech_stopped":
+            session.last_vad_stop = started_at or timestamp
+        elif kind == "user_turn_stopped":
+            # Latency counts from when the user actually went silent: the VAD
+            # says so after its stop_secs of silence, and the turn is ruled
+            # over after that. Pipecat measures from the silence too, so the
+            # live clock and the measured answer agree.
+            stopped = timestamp
+            if session.last_vad_stop is not None and 0 <= timestamp - session.last_vad_stop < 5:
+                stopped = session.last_vad_stop
+                if not session.has_tail_vad:
+                    # Without the VAD's own stop_secs, use the learned one.
+                    stopped -= session.endpointing_secs or 0.0
+            session.ruled_at = timestamp
+            session.ruled_turn = turn
+            session.bot_spoke_since_ruling = False
+            if turn is not None and not turn.has_bot_content:
+                turn.user_stopped_at = stopped
+            heard = session.llm_active or (turn is not None and turn.has_user_content)
+            session.speech[-1].heard = heard
+            if heard:
+                session.unheard_stop = None
+                session.start_wait(stopped, timestamp)
+            else:
+                # Nothing was heard, such as a murmur the transcription
+                # dropped: Pipecat ends the turn after its stop timeout and
+                # doesn't answer it, so the bot is still listening.
+                session.unheard_stop = (stopped, timestamp)
+        elif kind == "user_turn_started":
+            self._check_early_end(session, timestamp)
+            if (
+                session.unheard_stop is not None
+                and turn is not None
+                and turn is session.ruled_turn
+                and not turn.has_content
+            ):
+                # The turn so far was nothing the bot heard or answered: it
+                # starts over with what the user says now.
+                turn.restart(timestamp)
+            session.unheard_stop = None
+            if session.waiting_since is not None:
+                # The user went on before the bot answered.
+                session.wait_started_at = None
+            session.waiting_since = None
+        elif kind == "bot_speech_started":
+            session.bot_spoke_since_ruling = True
+            session.take_up_unheard(timestamp)
+            if session.waiting_since is not None:
+                session.wait_ended_at = timestamp
+            session.waiting_since = None
+            if turn is not None and turn.bot_started_at is None:
+                turn.bot_started_at = timestamp
+        elif kind == "bot_speech_stopped":
+            session.last_bot_stop = timestamp
+        elif kind == "interruption":
+            session.interruptions += 1
+            session.waiting_since = None
+            if turn is not None and turn.has_bot_content and not turn.interrupted:
+                turn.interrupted = True
+                turn.interrupted_at = timestamp
+
+    def _check_early_end(self, session: WorkerSession, timestamp: float) -> None:
+        """Note an early end when the user goes on right after their turn ended."""
+        ruled, turn = session.ruled_at, session.ruled_turn
+        session.ruled_at = None
+        if ruled is None or turn is None or session.bot_spoke_since_ruling:
+            return
+        if session.unheard_stop is not None:
+            # Nothing was heard and the bot didn't take the turn up: nothing
+            # reached the LLM, so nothing ended early.
+            return
+        if not 0 <= timestamp - ruled <= EARLY_END_SECS:
+            return
+        # The VAD heard the user start again a little before the turn started:
+        # use when the speech really began, if the VAD said so around then.
+        resumed = timestamp
+        for event in reversed(session.speech):
+            if event.timestamp < ruled - 0.5:
+                break
+            if event.kind == "user_speech_started" and event.timestamp <= timestamp:
+                resumed = event.started_at or event.timestamp
+                break
+        heard = turn.user_llm_texts[-1] if turn.user_llm_texts else turn.user_text
+        llm_started = session.llm_active or any(n == "llm" for _, n in session.wait_marks)
+        turn.early_ends.append(
+            EarlyEnd(
+                ruled_at=ruled, resumed_at=resumed, heard=heard.strip(), llm_started=llm_started
+            )
+        )
+
+    # Latency
+
+    def _apply_latency(
+        self, session: WorkerSession, data: dict[str, Any], timestamp: float
+    ) -> set[Area]:
+        latency = _number(data.get("latency_secs"))
+        if latency is None:
+            latency = _number(data.get("total_secs")) or 0.0
+        contributions = [c for c in data.get("contributions", []) if isinstance(c, dict)]
+        if not contributions:
+            contributions = legacy_contributions(data)
+        total = _number(data.get("total_secs"))
+        if total is None:
+            total = sum(_number(c.get("duration_secs")) or 0.0 for c in contributions) or latency
+        turn = session.current_turn
+        record = LatencyRecord(
+            turn=turn.number if turn else None,
+            latency_secs=latency,
+            total_secs=total,
+            contributions=contributions,
+            first_bot_speech=bool(data.get("first_bot_speech")),
+            timestamp=timestamp,
+            ttfb=[t for t in data.get("ttfb", []) if isinstance(t, dict)],
+            function_calls=[f for f in data.get("function_calls", []) if isinstance(f, dict)],
+        )
+        session.latencies.append(record)
+        if turn is not None:
+            turn.latency_secs = record.latency_secs
+            turn.latency = record
+        for c in contributions:
+            secs = _number(c.get("duration_secs"))
+            if c.get("key") == "endpointing_wait" and secs is not None and 0 < secs < 3:
+                session.endpointing_secs = secs
+        return {LATENCY, CONVERSATION, STRIP}
+
+    # Function calls
+
+    def _apply_function_call(
+        self, worker: Optional[str], data: dict[str, Any], timestamp: float
+    ) -> set[Area]:
         session = self.session(worker)
         tool_call_id = str(data.get("tool_call_id", ""))
         kind = str(data.get("kind", "function_call_started"))
@@ -761,26 +1370,160 @@ class SessionState:
         if call is None:
             call = FunctionCall(
                 tool_call_id=tool_call_id,
-                function_name=str(data.get("function_name", "?")),
+                function_name=str(data.get("function_name") or "?"),
             )
             turn.function_calls.append(call)
         call.kind = kind
         if data.get("function_name"):
             call.function_name = str(data["function_name"])
-        if "arguments" in data:
+        if "arguments" in data and data["arguments"] is not None:
             call.arguments = data["arguments"]
         if "result" in data:
             call.result = data["result"]
         if data.get("error"):
             call.error = str(data["error"])
         for name in ("started_at", "in_progress_at"):
-            value = data.get(name)
-            if isinstance(value, (int, float)):
-                setattr(call, name, float(value))
+            value = _number(data.get(name))
+            if value is not None:
+                setattr(call, name, value)
+        if call.started_at is None and kind == "function_call_started":
+            call.started_at = timestamp
+        if call.in_progress_at is None and kind == "function_call_in_progress":
+            call.in_progress_at = timestamp
         if call.settled:
-            stamp = data.get("timestamp")
-            call.settled_at = float(stamp) if isinstance(stamp, (int, float)) else time.time()
+            stamp = _number(data.get("timestamp"))
+            call.settled_at = stamp if stamp is not None else timestamp
         return {CONVERSATION}
+
+    def _apply_rtvi_function_call(
+        self, session: WorkerSession, msg_type: str, data: dict[str, Any], timestamp: float
+    ) -> set[Area]:
+        # Pipecat before 1.9 has no FunctionCallObserver, so Tail asks RTVI
+        # for full function call reports and reads them here.
+        if session.has_observer_function_calls:
+            return set()
+        event: dict[str, Any] = {
+            "tool_call_id": data.get("tool_call_id"),
+            "function_name": data.get("function_name"),
+        }
+        if msg_type == "llm-function-call-started":
+            event["kind"] = "function_call_started"
+        elif msg_type == "llm-function-call-in-progress":
+            event["kind"] = "function_call_in_progress"
+            event["arguments"] = data.get("arguments")
+        else:
+            cancelled = bool(data.get("cancelled"))
+            event["kind"] = "function_call_cancelled" if cancelled else "function_call_completed"
+            if "result" in data:
+                event["result"] = data.get("result")
+        if not event["tool_call_id"]:
+            return set()
+        return self._apply_function_call(session.name, event, timestamp)
+
+    # Metrics from RTVI
+
+    def _apply_rtvi_metrics(
+        self, session: WorkerSession, data: dict[str, Any], timestamp: float
+    ) -> set[Area]:
+        # Pipecat before 1.9 has no ServiceMetricsObserver, so Tail asks RTVI
+        # for metrics and reads them here.
+        if session.has_observer_metrics:
+            return set()
+        for kind in ("ttfb", "ttfa", "ttfat", "processing"):
+            for entry in data.get(kind, []) or []:
+                if not isinstance(entry, dict):
+                    continue
+                value = _number(entry.get("value"))
+                if value is None:
+                    continue
+                session.add_metric(
+                    str(entry.get("processor", "?")),
+                    kind,
+                    MetricPoint(timestamp=timestamp, seconds=value, model=entry.get("model")),
+                )
+        for entry in data.get("tokens", []) or []:
+            if isinstance(entry, dict):
+                record = dict(entry)
+                record["kind"] = "llm"
+                record.setdefault("processor", entry.get("processor", "?"))
+                session.add_usage(record)
+        for entry in data.get("characters", []) or []:
+            if isinstance(entry, dict):
+                value = _number(entry.get("value"))
+                session.add_usage(
+                    {
+                        "kind": "tts",
+                        "processor": entry.get("processor", "?"),
+                        "model": entry.get("model"),
+                        "characters": int(value or 0),
+                    }
+                )
+        return {METRICS, STRIP, FLOW}
+
+    # Flow
+
+    def _apply_llm_context(self, session: WorkerSession, data: dict[str, Any]) -> set[Area]:
+        summary = {k: v for k, v in data.items() if k not in ("items", "system", "tool_schemas")}
+        session.context = summary
+        start = data.get("start")
+        items = data.get("items")
+        if isinstance(start, int) and isinstance(items, list):
+            kept = session.context_items[: max(0, start)]
+            session.context_items = kept + [i for i in items if isinstance(i, dict)]
+        if "system" in data:
+            system = data.get("system")
+            session.system_instruction = system if isinstance(system, str) and system else None
+        if isinstance(data.get("tool_schemas"), list):
+            session.tool_schemas = [t for t in data["tool_schemas"] if isinstance(t, dict)]
+        turn = session.current_turn
+        if turn is not None and not turn.ended:
+            if turn.context_new_from is None:
+                previous = next(
+                    (
+                        t
+                        for t in reversed(session.turns)
+                        if t is not turn and t.context_items is not None
+                    ),
+                    None,
+                )
+                turn.context_new_from = len(previous.context_items or []) if previous else 0
+            turn.context = summary
+            turn.context_items = list(session.context_items)
+            turn.context_system = session.system_instruction
+            turn.context_tools = session.tool_schemas
+        return {CONVERSATION}
+
+    def _apply_flow(
+        self, session: WorkerSession, data: dict[str, Any], timestamp: float
+    ) -> set[Area]:
+        interval = _number(data.get("interval_secs")) or 0.25
+        interval = max(interval, 0.05)
+        processors = data.get("processors")
+        if not isinstance(processors, dict):
+            return set()
+        seen = set()
+        for name, sides in processors.items():
+            if not isinstance(sides, dict):
+                continue
+            stats = session.flow.setdefault(str(name), FlowStats())
+            out_counts = sides.get("out")
+            out_counts = out_counts if isinstance(out_counts, dict) else {}
+            in_counts = sides.get("in")
+            in_counts = in_counts if isinstance(in_counts, dict) else {}
+            stats.out_rates = {k: (_number(v) or 0.0) / interval for k, v in out_counts.items()}
+            stats.in_rates = {k: (_number(v) or 0.0) / interval for k, v in in_counts.items()}
+            stats.history.append(stats.out_total)
+            stats.updated_at = timestamp
+            seen.add(str(name))
+        # Processors that moved nothing in this interval are idle.
+        for name, stats in session.flow.items():
+            if name not in seen:
+                stats.out_rates = {}
+                stats.in_rates = {}
+                stats.history.append(0.0)
+        return {FLOW}
+
+    # Jobs
 
     def _apply_job(self, data: dict[str, Any], timestamp: float) -> set[Area]:
         job_id = data.get("job_id")
@@ -819,62 +1562,153 @@ class SessionState:
                 job.last = _summarize(data.get("data"))
         return {JOBS}
 
-    def _apply_rtvi(self, msg_type: str, worker: Optional[str], data: dict[str, Any]) -> set[Area]:
+    # RTVI
+
+    def _apply_rtvi(
+        self, msg_type: str, worker: Optional[str], data: dict[str, Any], timestamp: float
+    ) -> set[Area]:
         session = self.session(worker)
         match msg_type:
             case "user-started-speaking":
                 session.user_speaking = True
                 session.turn_for_input()
-                return {STRIP, CONVERSATION}
+                self._speech(session, "user_turn_started", timestamp, None)
+                return {STRIP, CONVERSATION, VOICE, LATENCY}
             case "user-stopped-speaking":
                 session.user_speaking = False
-                return {STRIP}
+                self._speech(session, "user_turn_stopped", timestamp, None)
+                return {STRIP, VOICE, LATENCY}
+            case "vad-user-started-speaking":
+                if not session.has_tail_vad:
+                    self._speech(session, "user_speech_started", timestamp, None)
+                return {VOICE, LATENCY}
+            case "vad-user-stopped-speaking":
+                if not session.has_tail_vad:
+                    self._speech(session, "user_speech_stopped", timestamp, None)
+                return {VOICE, LATENCY}
             case "bot-started-speaking":
                 session.bot_speaking = True
-                return {STRIP}
+                self._speech(session, "bot_speech_started", timestamp, None)
+                return {STRIP, VOICE, LATENCY}
             case "bot-stopped-speaking":
                 session.bot_speaking = False
+                self._speech(session, "bot_speech_stopped", timestamp, None)
+                return {STRIP, VOICE, LATENCY}
+            case "bot-interrupted":
+                # Pipecat interrupts at every user turn start; it only cuts
+                # the bot off when the bot is speaking (or just was).
+                stopped = session.last_bot_stop
+                turn = session.current_turn
+                speaking_words = bool(
+                    turn and any(seg.spoken_status == "in-progress" for seg in turn.segments)
+                )
+                if (
+                    session.bot_speaking
+                    or speaking_words
+                    or (stopped is not None and 0 <= timestamp - stopped < BARGE_IN_GRACE_SECS)
+                ):
+                    self._speech(session, "interruption", timestamp, None)
+                return {CONVERSATION, LATENCY, VOICE, STRIP}
+            case "user-mute-started":
+                session.user_muted = True
                 return {STRIP}
+            case "user-mute-stopped":
+                session.user_muted = False
+                return {STRIP}
+            case "bot-llm-started":
+                session.take_up_unheard(timestamp)
+                session.llm_active = True
+                session.mark_wait(timestamp, "llm")
+                return {STRIP, CONVERSATION, FLOW}
+            case "bot-llm-stopped":
+                session.llm_active = False
+                return {STRIP, CONVERSATION, FLOW}
+            case "bot-tts-started":
+                session.tts_active = True
+                session.mark_wait(timestamp, "tts", once=True)
+                return {STRIP, FLOW}
+            case "bot-tts-stopped":
+                session.tts_active = False
+                return {STRIP, FLOW}
             case "user-audio-level":
-                level = data.get("value", 0.0)
-                session.user_level = float(level) if isinstance(level, (int, float)) else 0.0
-                session.user_levels.append(session.user_level)
-                return {STRIP}
+                level = _number(data.get("value")) or 0.0
+                session.user_level = level
+                session.user_levels.append(level)
+                session.user_wave.append((timestamp, level))
+                return {STRIP, VOICE}
             case "bot-audio-level":
-                level = data.get("value", 0.0)
-                session.bot_level = float(level) if isinstance(level, (int, float)) else 0.0
-                session.bot_levels.append(session.bot_level)
-                return {STRIP}
+                level = _number(data.get("value")) or 0.0
+                session.bot_level = level
+                session.bot_levels.append(level)
+                session.bot_wave.append((timestamp, level))
+                return {STRIP, VOICE}
+            case "user-input":
+                session.has_user_input = True
+                return self._apply_user_input(session, data, timestamp)
             case "user-transcription":
+                if session.has_user_input:
+                    return set()
                 text = str(data.get("text", ""))
                 turn = session.turn_for_input()
                 if data.get("final", True):
                     turn.user_text = (turn.user_text + " " + text).strip()
                     turn.user_interim = ""
+                    session.take_up_unheard(timestamp)
                 else:
                     turn.user_interim = text
                 return {CONVERSATION}
             case "user-llm-text":
+                session.take_up_unheard(timestamp)
+                # Sent each time the context goes to the LLM ending in a user
+                # message. A turn holds several when Pipecat ended the user's
+                # turn at a pause and the user went on before the bot spoke.
                 turn = session.current_turn or session.turn_for_input()
-                turn.user_llm_text = str(data.get("text", ""))
+                text = str(data.get("text", ""))
+                if not turn.user_llm_texts or turn.user_llm_texts[-1] != text:
+                    turn.user_llm_texts.append(text)
                 return {CONVERSATION}
-            case "bot-llm-text":
+            case "llm-raw-text":
+                session.has_llm_raw = True
+                session.mark_wait(timestamp, "first sentence", once=True)
                 turn = session.turn_for_output()
                 turn.llm_text += str(data.get("text", ""))
                 return {CONVERSATION}
+            case "bot-llm-text":
+                session.mark_wait(timestamp, "first sentence", once=True)
+                if session.has_llm_raw:
+                    return set()
+                turn = session.turn_for_output()
+                turn.llm_text += str(data.get("text", ""))
+                return {CONVERSATION}
+            case "tts-raw-text":
+                session.has_tts_raw = True
+                turn = session.turn_for_output()
+                turn.tts_text = (turn.tts_text + " " + str(data.get("text", ""))).strip()
+                return {CONVERSATION}
             case "bot-tts-text":
+                if session.has_tts_raw:
+                    return set()
                 turn = session.turn_for_output()
                 turn.tts_text = (turn.tts_text + " " + str(data.get("text", ""))).strip()
                 return {CONVERSATION}
             case "bot-output":
-                return self._apply_bot_output(session, data)
-            case "bot-interrupted":
+                return self._apply_bot_output(session, data, timestamp)
+            case "bot-llm-marker":
                 turn = session.current_turn
-                if turn is not None and turn.has_bot_content and not turn.interrupted:
-                    turn.interrupted = True
-                    turn.interrupted_at = time.time()
-                    return {CONVERSATION, LATENCY}
-                return set()
+                if turn is not None:
+                    turn.marker = {
+                        "text": str(data.get("text", "")),
+                        "kind": data.get("kind"),
+                    }
+                return {CONVERSATION}
+            case (
+                "llm-function-call-started"
+                | "llm-function-call-in-progress"
+                | ("llm-function-call-stopped")
+            ):
+                return self._apply_rtvi_function_call(session, msg_type, data, timestamp)
+            case "metrics":
+                return self._apply_rtvi_metrics(session, data, timestamp)
             case "system-log":
                 text = str(data.get("text", "")).rstrip()
                 self.logs.append(_parse_loguru_line(text, worker))
@@ -886,16 +1720,57 @@ class SessionState:
                         category="unknown",
                         processor="?",
                         processor_usable=not bool(data.get("fatal")),
-                        timestamp=time.time(),
+                        timestamp=timestamp,
                         worker=worker,
                     )
                 )
-                return {ERRORS}
+                return {ERRORS, STRIP}
         return set()
 
-    def _apply_bot_output(self, session: WorkerSession, data: dict[str, Any]) -> set[Area]:
-        turn = session.turn_for_output()
+    def _apply_user_input(
+        self, session: WorkerSession, data: dict[str, Any], timestamp: float
+    ) -> set[Area]:
         text = str(data.get("text", ""))
+        input_type = str(data.get("input_type", "transcription"))
+        if input_type == "backchannel":
+            # Said while the bot talks; it doesn't start a turn.
+            turn = session.current_turn or session.turn_for_input()
+            turn.backchannels.append(Backchannel(who="user", text=text, timestamp=timestamp))
+            return {CONVERSATION, STRIP, VOICE}
+        turn = session.turn_for_input()
+        if input_type == "chat":
+            turn.input_type = "chat"
+            turn.user_text = (turn.user_text + " " + text).strip()
+            turn.user_interim = ""
+            return {CONVERSATION}
+        if data.get("final", True):
+            turn.user_text = (turn.user_text + " " + text).strip()
+            turn.user_interim = ""
+            session.take_up_unheard(timestamp)
+            perception = data.get("perception")
+            if isinstance(perception, list):
+                turn.perception = [p for p in perception if isinstance(p, dict)]
+            speaker = data.get("speaker")
+            if isinstance(speaker, dict):
+                label = speaker.get("label") or speaker.get("id") or speaker.get("name")
+                turn.speaker = str(label) if label is not None else turn.speaker
+            elif isinstance(speaker, (str, int)):
+                turn.speaker = str(speaker)
+        else:
+            turn.user_interim = text
+        return {CONVERSATION}
+
+    def _apply_bot_output(
+        self, session: WorkerSession, data: dict[str, Any], timestamp: float
+    ) -> set[Area]:
+        text = str(data.get("text", ""))
+        output_type = data.get("output_type") or data.get("text_type") or data.get("aggregated_by")
+        if output_type == "backchannel":
+            turn = session.current_turn or session.turn_for_output()
+            if data.get("spoken_status") in (None, "new"):
+                turn.backchannels.append(Backchannel(who="bot", text=text, timestamp=timestamp))
+            return {CONVERSATION}
+        turn = session.turn_for_output()
         segment_id = data.get("segment_id")
         will_be_spoken = data.get("will_be_spoken")
         if will_be_spoken is None:
@@ -909,7 +1784,12 @@ class SessionState:
                     segment = candidate
                     break
         if segment is None:
-            segment = Segment(segment_id=segment_id, text=text, will_be_spoken=bool(will_be_spoken))
+            segment = Segment(
+                segment_id=segment_id,
+                text=text,
+                will_be_spoken=bool(will_be_spoken),
+                output_type=str(output_type) if output_type else None,
+            )
             turn.segments.append(segment)
             self._consume(turn, text)
         elif text and not segment.text:
@@ -917,8 +1797,16 @@ class SessionState:
         if status is not None:
             segment.spoken_status = status
         if isinstance(progress, dict):
+            previous = len(segment.accumulated)
             segment.accumulated = str(progress.get("accumulated_text", segment.accumulated))
             segment.remaining = str(progress.get("remaining_text", segment.remaining))
+        else:
+            previous = len(segment.accumulated)
+        delivery = data.get("delivery")
+        if isinstance(delivery, list):
+            # The delivery applies to the words just spoken.
+            offset = previous if status == "in-progress" else 0
+            segment.set_delivery(offset, tuple(str(d) for d in delivery))
         return {CONVERSATION}
 
     @staticmethod
@@ -933,6 +1821,85 @@ class SessionState:
             turn.consumed = index + len(needle)
         else:
             turn.consumed = min(len(turn.llm_text), turn.consumed + len(needle))
+
+
+# Contribution keys by the kind of service a TTFB came from.
+_TTFB_KEYS = (
+    ("STT", "transcription", "transcription"),
+    ("LLM", "llm_inference", "LLM inference"),
+    ("TTS", "speech_synthesis", "speech synthesis"),
+)
+
+
+def legacy_contributions(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build latency contributions from a breakdown that has none (before Pipecat 1.9).
+
+    Older ``LatencyBreakdown`` messages carry the user turn duration, TTFB per
+    service, the text aggregation and function call timings. They become
+    contributions in time order, keyed the way newer Pipecat keys them.
+
+    Args:
+        data: The fields of a ``LatencyBreakdown``.
+
+    Returns:
+        Contributions with ``key``, ``label``, ``owner``, ``start_time`` and
+        ``duration_secs``.
+    """
+    parts: list[dict[str, Any]] = []
+    start = _number(data.get("user_turn_start_time"))
+    turn_secs = _number(data.get("user_turn_secs"))
+    if turn_secs:
+        parts.append(
+            {
+                "key": "endpointing_wait",
+                "label": "endpointing wait",
+                "owner": "turn",
+                "start_time": start or 0.0,
+                "duration_secs": turn_secs,
+            }
+        )
+    for entry in data.get("ttfb", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        processor = str(entry.get("processor", "?"))
+        key, label = "service", "service"
+        for needle, k, lbl in _TTFB_KEYS:
+            if needle in processor:
+                key, label = k, lbl
+                break
+        parts.append(
+            {
+                "key": key,
+                "label": label,
+                "owner": processor,
+                "start_time": _number(entry.get("start_time")) or 0.0,
+                "duration_secs": _number(entry.get("duration_secs")) or 0.0,
+            }
+        )
+    aggregation = data.get("text_aggregation")
+    if isinstance(aggregation, dict):
+        parts.append(
+            {
+                "key": "sentence_aggregation",
+                "label": "sentence aggregation",
+                "owner": aggregation.get("processor"),
+                "start_time": _number(aggregation.get("start_time")) or 0.0,
+                "duration_secs": _number(aggregation.get("duration_secs")) or 0.0,
+            }
+        )
+    for call in data.get("function_calls", []) or []:
+        if isinstance(call, dict):
+            parts.append(
+                {
+                    "key": "function_handler",
+                    "label": "function handler",
+                    "owner": call.get("function_name"),
+                    "start_time": _number(call.get("start_time")) or 0.0,
+                    "duration_secs": _number(call.get("duration_secs")) or 0.0,
+                }
+            )
+    parts.sort(key=lambda p: p["start_time"])
+    return parts
 
 
 def _summarize(value: Any, limit: int = 80) -> Optional[str]:
