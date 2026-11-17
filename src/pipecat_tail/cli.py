@@ -9,14 +9,15 @@
 """Tail standalone application.
 
 Connects to a Tail server, local or remote, and shows the session as it
-happens. Reconnects on its own when the bot restarts. Can also record the
-session to a file, or replay a recorded one without a bot.
+happens. Reconnects on its own when the bot restarts. ``--demo`` plays a
+scripted session instead, to try Tail without a bot.
 
 Registered as the ``tail`` command of the ``pipecat`` CLI.
 """
 
 import asyncio
 import sys
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -24,7 +25,6 @@ from loguru import logger
 
 from pipecat_tail.app import TailApp
 from pipecat_tail.client import TailClient
-from pipecat_tail.session import replay_session
 
 DEFAULT_URL = "ws://localhost:9292"
 
@@ -32,24 +32,24 @@ DEFAULT_URL = "ws://localhost:9292"
 class PipecatTail:
     """Standalone Tail application driven by a websocket connection."""
 
-    def __init__(self, *, url: str = DEFAULT_URL, save: Optional[str] = None):
+    def __init__(self, *, url: str = DEFAULT_URL, report_path: Optional[Path] = None):
         """Initialize the application.
 
         Args:
             url: Tail server URL.
-            save: Session file to record to from the start.
+            report_path: Where to write a report of the session on quit.
         """
         self._url = url
         self._app = TailApp(
             on_mount=self._on_mount,
             on_shutdown=self._on_shutdown,
             action_connect=self._on_connect,
-            save_path=save,
+            url=url,
+            report_path=report_path,
         )
         self._client = TailClient(
             url, on_message=self._app.handle_message, on_status=self._app.handle_status
         )
-        self._logger_id: Optional[int] = None
 
     async def run(self) -> None:
         """Run the app until it quits."""
@@ -68,19 +68,17 @@ class PipecatTail:
         self._client.reconnect_now()
 
 
-class PipecatTailReplay:
-    """Standalone Tail application driven by a recorded session."""
+class PipecatTailDemo:
+    """Standalone Tail application playing the scripted demo session."""
 
-    def __init__(self, *, path: str, speed: float = 1.0):
+    def __init__(self, *, speed: float = 1.0):
         """Initialize the application.
 
         Args:
-            path: Session file to replay.
-            speed: Playback speed multiplier. ``0`` loads everything at once.
+            speed: Playback speed.
         """
-        self._path = path
         self._speed = speed
-        self._app = TailApp(on_mount=self._on_mount, on_shutdown=self._on_shutdown)
+        self._app = TailApp(on_mount=self._on_mount, on_shutdown=self._on_shutdown, url="demo")
         self._task: Optional[asyncio.Task] = None
 
     async def run(self) -> None:
@@ -89,8 +87,8 @@ class PipecatTailReplay:
 
     async def _on_mount(self) -> None:
         logger.remove()
-        await self._app.handle_status("connected", f"replay {self._path}")
-        self._task = asyncio.create_task(self._replay())
+        await self._app.handle_status("connecting")
+        self._task = asyncio.create_task(self._play())
 
     async def _on_shutdown(self) -> None:
         if self._task and not self._task.done():
@@ -101,14 +99,14 @@ class PipecatTailReplay:
                 pass
         logger.add(sys.stderr)
 
-    async def _replay(self) -> None:
-        try:
-            async for message in replay_session(self._path, speed=self._speed):
-                await self._app.handle_message(message)
-        except FileNotFoundError:
-            await self._app.handle_status("error", f"no such file: {self._path}")
-            return
-        await self._app.handle_status("disconnected", "replay finished")
+    async def _play(self) -> None:
+        from pipecat_tail import demo
+
+        # Let the waiting screen show for a moment, like a bot starting up.
+        await asyncio.sleep(1.5)
+        await self._app.handle_status("connected", "demo")
+        async for message in demo.play(loop=True, speed=self._speed):
+            await self._app.handle_message(message)
 
 
 def version_callback(value: bool):
@@ -135,23 +133,45 @@ def cli(
     ctx: typer.Context,
     _version: bool = typer.Option(None, "--version", callback=version_callback, help="CLI version"),
     url: str = typer.Option(DEFAULT_URL, "-u", "--url", help="URL of the Tail server"),
-    save: Optional[str] = typer.Option(
-        None, "-s", "--save", help="Record the session to this JSON Lines file"
+    demo: bool = typer.Option(
+        False, "--demo", help="Play a scripted session instead of connecting to a bot"
     ),
-    replay: Optional[str] = typer.Option(
-        None, "-r", "--replay", help="Replay a recorded session file instead of connecting"
+    target: float = typer.Option(
+        1.0,
+        "--target",
+        help="Response time to aim for, in seconds: green under it, amber up to 1.6 times it",
     ),
-    speed: float = typer.Option(
-        1.0, "--speed", help="Replay speed multiplier (0 loads everything at once)"
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help="No UI: print the session as JSON lines (turns, errors, a summary) and exit "
+        "when the bot goes away",
+    ),
+    report: Optional[Path] = typer.Option(
+        None,
+        "--report",
+        help="Write a report of the session here on exit: Markdown for .md, JSON otherwise",
     ),
 ):
     """Pipecat Tail command."""
     if ctx.invoked_subcommand is not None:
         return
-    if replay:
-        app = PipecatTailReplay(path=replay, speed=speed)
-    else:
-        app = PipecatTail(url=url, save=save)
+    from pipecat_tail.widgets import palette
+
+    palette.set_latency_target(target)
+    if as_json:
+        from pipecat_tail.report import JsonStream
+
+        # Keep stdout for the JSON lines.
+        logger.remove()
+        logger.add(sys.stderr, level="WARNING")
+        stream = JsonStream(url, report_path=report)
+        try:
+            asyncio.run(stream.run())
+        except KeyboardInterrupt:
+            pass
+        return
+    app = PipecatTailDemo() if demo else PipecatTail(url=url, report_path=report)
     asyncio.run(app.run())
 
 

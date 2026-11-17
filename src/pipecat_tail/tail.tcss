@@ -1,166 +1,73 @@
 Screen {
     layout: vertical;
+    background: $background;
 }
 
-#banner {
-    height: 1;
-    padding: 0 1;
-    background: $error 30%;
-    color: $text;
-}
-
-#strip {
-    height: 1;
-    padding: 0 1;
-    background: $surface;
-    color: $text;
-}
-
-#strip-text {
-    width: 1fr;
-}
-
-#strip-rec {
-    width: auto;
-    padding: 0 1;
-    margin: 0 1;
-    background: $error;
-    color: $text;
-    text-style: bold;
-}
-
-#strip Label {
-    color: $text-muted;
-    margin: 0 1;
-}
-
-#strip Label.speaking {
-    color: $text;
-    text-style: bold;
-}
-
-#strip LevelMeter {
-    width: 16;
-}
-
-#strip LevelMeter Bar {
-    width: 16;
-}
-
-#tabs {
+#views {
     height: 1fr;
 }
 
-TabPane {
-    padding: 0 1;
-}
-
-/* Conversation */
-
-#conversation-view {
-    height: 1fr;
-    border: round $primary;
-    border-title-color: $secondary;
-    border-subtitle-align: left;
-    padding: 0 1;
-}
-
-#conversation-view .turn {
-    padding: 0 1;
-    margin-bottom: 1;
-    border-left: wide $primary 60%;
-}
-
-#conversation-view .turn.alt {
-    background: $boost;
-}
-
-#conversation-view .turn.interrupted {
-    border-left: wide $error;
-}
-
-/* Latency */
-
-#latency-view {
+#views > * {
     height: 1fr;
 }
 
-#latency-bars {
-    height: 1fr;
-    border: round $primary;
-    border-title-color: $secondary;
-    border-subtitle-color: $text-muted;
+/*
+ * Panels are sections under a rule: the title sits in the line, with no box
+ * around the panel, so the side pane keeps its columns. A panel beside
+ * another keeps a line on its left.
+ */
+
+#voice,
+#live-conversation,
+#pipeline-flow,
+#startup,
+#worker-tree,
+#jobs-table,
+#bus-feed,
+#waterfall-panel,
+#stage-stats,
+#histogram,
+#speech-lanes,
+#service-latency,
+#usage,
+#log-lines {
+    border: none;
+    border-top: solid $border;
+    border-title-color: $text-muted;
+    border-title-style: bold;
+    background: $background;
+}
+
+#pipeline-side,
+#histogram {
+    border-left: solid $border;
+}
+
+#startup,
+#worker-tree,
+#bus-feed,
+#log-lines {
     padding: 0 1;
 }
 
-.latency-ruler {
-    height: 1;
+/* What was said starts a line below its rule, and every view ends a line
+ * above the key line, unless the terminal is short. */
+#live-conversation {
+    padding: 1 1 0 1;
 }
 
-#latency-scroll {
-    height: 1fr;
+#key-bar {
+    margin-top: 1;
 }
 
-#latency-bottom {
-    height: 11;
-}
-
-#latency-stats {
-    width: 1fr;
-    height: 100%;
-    border: round $primary;
-    border-title-color: $secondary;
+Screen.-tiny #live-conversation,
+Screen.-short #live-conversation {
     padding: 0 1;
 }
 
-#latency-legend {
-    width: 1fr;
-    height: 100%;
-    border: round $primary;
-    border-title-color: $secondary;
-    padding: 0 1;
-}
-
-#speaking-timeline {
-    height: 8;
-    border-subtitle-align: left;
-    border: round $primary;
-    border-title-color: $secondary;
-    border-subtitle-color: $text-muted;
-    padding: 0 1;
-}
-
-/* Workers */
-
-#workers-view {
-    height: 1fr;
-}
-
-#workers-top {
-    height: 2fr;
-}
-
-#worker-tree {
-    width: 2fr;
-    height: 100%;
-    border: round $primary;
-    border-title-color: $secondary;
-    padding: 0 1;
-}
-
-#jobs-table {
-    width: 3fr;
-    height: 100%;
-    border: round $primary;
-    border-title-color: $secondary;
-}
-
-#bus-feed {
-    height: 3fr;
-    border: round $primary;
-    border-title-color: $secondary;
-    border-subtitle-color: $text-muted;
-    padding: 0 1;
+Screen.-tiny #key-bar,
+Screen.-short #key-bar {
+    margin-top: 0;
 }
 
 /* Metrics */
@@ -169,36 +76,15 @@ TabPane {
     height: 1fr;
 }
 
-#metrics-top {
-    height: 2fr;
+#service-latency,
+#usage {
+    height: auto;
+    padding: 0 1 1 1;
 }
 
-#latency-chart {
-    width: 3fr;
-    border: round $primary;
-    border-title-color: $secondary;
-}
-
-#series {
-    width: 1fr;
-    height: 100%;
-    border: round $primary;
-    border-title-color: $secondary;
-}
-
-#summary-table {
-    height: 1fr;
-    border: round $primary;
-    border-title-color: $secondary;
-}
+/* Startup */
 
 #startup {
-    height: auto;
-    max-height: 40%;
-    border: round $primary;
-    border-title-color: $secondary;
-    border-subtitle-color: $text-muted;
-    padding: 0 1;
     overflow-y: auto;
 }
 
@@ -218,14 +104,109 @@ TabPane {
 
 #log-lines {
     height: 1fr;
-    border: round $primary;
-    border-title-color: $secondary;
-    border-subtitle-color: $text-muted;
-    padding: 0 1;
 }
 
 #log-pinned {
     height: 1;
     padding: 0 1;
     background: $surface;
+}
+
+/* Notifications sit above the key bar. */
+
+Toast {
+    background: $panel;
+}
+
+/*
+ * Terminal sizes. The screen carries -narrow or -wide, and -tiny, -short,
+ * -tall or -huge (see TailApp's breakpoints). Tail often sits in a side pane
+ * next to the client, so the conversation and the time breakdown keep their
+ * room and the audio tracks give way.
+ */
+
+#voice {
+    height: 9;
+}
+
+Screen.-huge #voice {
+    height: 11;
+}
+
+Screen.-short #voice {
+    height: 6;
+}
+
+Screen.-tiny #voice {
+    display: none;
+}
+
+/* Looking back or after the call, the timeline keeps only its lanes. */
+LiveView.-looking-back #voice {
+    height: 3;
+}
+
+/* Narrow, the pipeline's panels stack and the view scrolls. */
+Screen.-narrow #pipeline {
+    overflow-y: auto;
+}
+
+Screen.-narrow #pipeline-top {
+    layout: vertical;
+    height: auto;
+}
+
+Screen.-narrow #pipeline-flow,
+Screen.-narrow #pipeline-side {
+    width: 100%;
+    height: auto;
+}
+
+Screen.-narrow #pipeline-side {
+    border-left: none;
+}
+
+Screen.-narrow #startup {
+    max-height: 24;
+}
+
+Screen.-narrow #worker-tree {
+    height: auto;
+    max-height: 12;
+}
+
+Screen.-narrow #jobs-table {
+    height: auto;
+    max-height: 10;
+}
+
+Screen.-narrow #bus-feed {
+    height: 16;
+}
+
+/* Narrow, the current turn's breakdown moves under the clock. */
+Screen.-narrow #hud {
+    height: 6;
+}
+
+#waterfall-panel {
+    min-height: 6;
+}
+
+Screen.-short #speech-lanes,
+Screen.-tiny #speech-lanes {
+    display: none;
+}
+
+Screen.-tiny #latency-bottom {
+    height: 10;
+}
+
+Screen.-narrow #histogram {
+    display: none;
+}
+
+Screen.-tiny SplashPulse,
+Screen.-tiny SplashHowTo {
+    margin: 1 0 0 0;
 }

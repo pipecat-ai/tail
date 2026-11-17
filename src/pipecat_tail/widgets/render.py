@@ -6,8 +6,8 @@
 
 """Rendering helpers shared by the Tail widgets.
 
-Colors follow the Nord palette the app theme uses, so Rich text drawn by the
-widgets matches the Textual chrome around it.
+The constants are the dark Tail palette (see ``palette``), for widgets that
+style text once rather than on every render.
 """
 
 import datetime
@@ -16,20 +16,20 @@ from typing import Iterable, Optional, Sequence
 from rich.style import Style
 from rich.text import Text
 
-# Nord
-POLAR_1 = "#3B4252"
-POLAR_3 = "#4C566A"
-DIM = "#7B88A1"
-SNOW = "#D8DEE9"
-BRIGHT = "#ECEFF4"
-FROST_CYAN = "#88C0D0"
-FROST_BLUE = "#81A1C1"
-FROST_DEEP = "#5E81AC"
-RED = "#BF616A"
-ORANGE = "#D08770"
-YELLOW = "#EBCB8B"
-GREEN = "#A3BE8C"
-PURPLE = "#B48EAD"
+# Tail, dark
+POLAR_1 = "#19212c"
+POLAR_3 = "#2f3b4e"
+DIM = "#8592a6"
+SNOW = "#c9d3e0"
+BRIGHT = "#f2f6fb"
+FROST_CYAN = "#4cc2ff"
+FROST_BLUE = "#7fd8ff"
+FROST_DEEP = "#5b8def"
+RED = "#ff5a6a"
+ORANGE = "#ff9d5c"
+YELLOW = "#ffc857"
+GREEN = "#4be08a"
+PURPLE = "#b18cff"
 
 STYLE_DIM = Style(color=DIM)
 STYLE_LABEL = Style(color=DIM)
@@ -95,19 +95,19 @@ def contribution_color(key: str) -> str:
 
 
 def fmt_secs(value: Optional[float], digits: int = 2) -> str:
-    """Format seconds compactly, or a dash when unknown."""
+    """Format seconds as ``340 ms`` or ``1.26 s``, or a dash when unknown."""
     if value is None:
         return "—"
     if value < 1.0:
         return f"{value * 1000:.0f} ms"
-    return f"{value:.{digits}f}s"
+    return f"{value:.{digits}f} s"
 
 
 def fmt_secs_fixed(value: Optional[float]) -> str:
     """Format seconds with two decimals and a unit, or a dash when unknown."""
     if value is None:
         return "—"
-    return f"{value:.2f}s"
+    return f"{value:.2f} s"
 
 
 def fmt_clock(timestamp: Optional[float]) -> str:
@@ -127,9 +127,38 @@ def fmt_elapsed(seconds: float) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+def fmt_compact(value: float) -> str:
+    """Format a count compactly: ``980``, ``12.4k``, ``3.1M``."""
+    value = float(value or 0)
+    if value < 1000:
+        return f"{value:.0f}"
+    if value < 1_000_000:
+        return f"{value / 1000:.1f}k"
+    return f"{value / 1_000_000:.1f}M"
+
+
+def fmt_latency_digits(seconds: float) -> tuple[str, str]:
+    """Split a latency into digits and unit for the large readout."""
+    if seconds < 1.0:
+        return f"{seconds * 1000:.0f}", "ms"
+    if seconds < 10.0:
+        return f"{seconds:.2f}", "s"
+    return f"{seconds:.1f}", "s"
+
+
 def fmt_int(value: int) -> str:
     """Format an integer with thousands separators."""
     return f"{value:,}"
+
+
+def fit_hints(hints: list[str], width: int, sep: str = " · ") -> str:
+    """As many whole hints as fit in ``width`` characters, joined by ``sep``."""
+    shown: list[str] = []
+    for hint in hints:
+        if len(sep.join([*shown, hint])) > width:
+            break
+        shown.append(hint)
+    return sep.join(shown)
 
 
 def truncate(text: str, limit: int) -> str:

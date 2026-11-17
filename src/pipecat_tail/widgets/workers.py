@@ -10,10 +10,12 @@ import json
 from typing import Any, Optional
 
 from rich.text import Text
+from textual import events
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, RichLog, Tree
 
 from pipecat_tail.state import BusRecord, SessionState
+from pipecat_tail.widgets.logs import ShownLog
 from pipecat_tail.widgets.render import (
     FROST_BLUE,
     FROST_CYAN,
@@ -51,7 +53,7 @@ class WorkerTree(Tree):
     def __init__(self):
         """Create the tree."""
         super().__init__("runner", id="worker-tree")
-        self.border_title = "Workers"
+        self.border_title = "workers"
         self.show_root = True
         self.guide_depth = 3
         self._expanded: set[str] = set()
@@ -135,7 +137,7 @@ class JobsTable(DataTable):
     def __init__(self):
         """Create the table."""
         super().__init__(id="jobs-table", cursor_type="row", zebra_stripes=True)
-        self.border_title = "Jobs"
+        self.border_title = "jobs"
 
     def on_mount(self) -> None:
         """Add the columns."""
@@ -170,14 +172,15 @@ def _job_style(status: str):
     return STYLE_DIM
 
 
-class BusFeed(RichLog):
+class BusFeed(ShownLog):
     """Bus messages as they happen."""
 
     def __init__(self):
         """Create the feed."""
         super().__init__(id="bus-feed", max_lines=MAX_BUS_LINES, wrap=False, highlight=False)
-        self.border_title = "Bus messages"
+        self.border_title = "bus"
         self.filter_index = 0
+        self.note = ""
         self._count = 0
         self._hidden = 0
         self._update_subtitle()
@@ -227,7 +230,8 @@ class BusFeed(RichLog):
 
     def _update_subtitle(self) -> None:
         hidden = f" · {self._hidden} hidden" if self._hidden else ""
-        self.border_subtitle = f"filter {self.filter_name}{hidden} · b to change"
+        note = f" · {self.note}" if self.note else ""
+        self.border_title = f"bus · {self.filter_name}{hidden}{note}"
 
 
 def _render_bus_record(record: BusRecord) -> Text:

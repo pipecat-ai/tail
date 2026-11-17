@@ -10,7 +10,9 @@ import re
 from typing import Optional
 
 from rich.style import Style
+from rich.table import Table
 from rich.text import Text
+from textual import events
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Input, RichLog, Static
 
@@ -37,10 +39,26 @@ LEVEL_RANK = {
     "CRITICAL": 50,
 }
 MAX_LINES = 2000
+COMPACT_WIDTH = 100
+"""Below this width a line is the seconds, a one-letter level, the logger's last
+name and the message, wrapped, so the message is never pushed off the side."""
 MATCH_STYLE = Style(color=YELLOW, bold=True, underline=True)
 
 
-class LogLines(RichLog):
+class ShownLog(RichLog):
+    """A ``RichLog`` that renders what was written to it while hidden.
+
+    A log written to while its view is hidden waits for a resize to learn its
+    width, and showing the view does not always send one.
+    """
+
+    def render_deferred(self) -> None:
+        """Render the lines written while hidden, once the log has a size."""
+        if not self._size_known and self.size.width:
+            self.on_resize(events.Resize(self.size, self.virtual_size))
+
+
+class LogLines(ShownLog):
     """The log lines themselves."""
 
     def __init__(self):
@@ -65,6 +83,7 @@ class LogsView(Vertical):
         self._shown = 0
         self._matches = 0
         self._state: Optional[SessionState] = None
+        self._compact = False
 
     def compose(self):
         """Compose the search box, the lines and the pinned errors."""
@@ -162,13 +181,54 @@ class LogsView(Vertical):
         self._write(record)
         self._update_title()
 
+    def on_resize(self) -> None:
+        """Rewrite the lines when the width calls for the other layout."""
+        width = self.lines.size.width
+        compact = 0 < width < COMPACT_WIDTH
+        if width and compact != self._compact:
+            self._compact = compact
+            self.rebuild()
+
     def _write(self, record: LogRecord) -> None:
         if not self.accepts(record):
             return
         self._shown += 1
         if self.pattern:
             self._matches += 1
-        self.lines.write(self._line(record))
+        if self._compact:
+            # The scrollbar takes two columns of the content region.
+            width = max(20, self.lines.scrollable_content_region.width - 2)
+            self.lines.write(self._compact_line(record), width=width, expand=True)
+        else:
+            self.lines.write(self._line(record))
+
+    def _message(self, record: LogRecord) -> Text:
+        level = record.level.upper()
+        message = Text(record.message, style=STYLE_TEXT)
+        if level in ("ERROR", "CRITICAL"):
+            message.stylize(STYLE_ERROR)
+        elif level == "WARNING":
+            message.stylize(LEVEL_STYLES["WARNING"])
+        if self.pattern:
+            message.highlight_regex(self.pattern, MATCH_STYLE)
+        if record.exception:
+            message.append(f"  {truncate(record.exception, 120)}", style=STYLE_ERROR)
+        return message
+
+    def _compact_line(self, record: LogRecord) -> Table:
+        level = record.level.upper()
+        line = Table.grid(padding=(0, 1), expand=True)
+        line.add_column(no_wrap=True)
+        line.add_column(no_wrap=True)
+        line.add_column(no_wrap=True, width=11)
+        line.add_column(ratio=1, overflow="fold")
+        line.add_row(
+            Text(record.clock[-6:], style=STYLE_DIM),
+            Text(level[:1], style=LEVEL_STYLES.get(level, STYLE_TEXT)),
+            Text(truncate(record.name.rsplit(".", 1)[-1], 11), style=STYLE_DIM),
+            self._message(record),
+        )
+        return line
 
     def _line(self, record: LogRecord) -> Text:
         text = Text()
@@ -179,25 +239,16 @@ class LogsView(Vertical):
         if record.worker:
             module = truncate(f"{record.worker} {record.name}", 34)
         text.append(f"{module:<34} ", style=STYLE_DIM)
-        message = Text(record.message, style=STYLE_TEXT)
-        if level in ("ERROR", "CRITICAL"):
-            message.stylize(STYLE_ERROR)
-        elif level == "WARNING":
-            message.stylize(LEVEL_STYLES["WARNING"])
-        if self.pattern:
-            message.highlight_regex(self.pattern, MATCH_STYLE)
-        text.append_text(message)
-        if record.exception:
-            text.append(f"  {truncate(record.exception, 120)}", style=STYLE_ERROR)
+        text.append_text(self._message(record))
         return text
 
     def _update_title(self) -> None:
-        pieces = [f"level {self.level}"]
+        pieces = ["logs", f"level {self.level}"]
         if self.pattern:
-            pieces.append(f"search /{self.pattern.pattern}/ · {self._matches} matches")
-        pieces.append("following" if self.following else "paused (f to follow)")
-        self.lines.border_title = "Logs"
-        self.lines.border_subtitle = " · ".join(pieces)
+            pieces.append(f"/{self.pattern.pattern}/ {self._matches} matches")
+        if not self.following:
+            pieces.append("paused")
+        self.lines.border_title = " · ".join(pieces)
 
     def refresh_pinned(self) -> None:
         """Re-render the pinned errors line."""

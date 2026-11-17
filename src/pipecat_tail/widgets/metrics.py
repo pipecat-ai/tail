@@ -4,218 +4,264 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""The Metrics tab: latency chart, usage summary and startup timing."""
+"""The Metrics tab: latency per service and usage, and the startup panel.
+
+Each service metric is a row: a sparkline of its recent values in the
+service's color, then the last, the median and the worst. Usage is what each
+service used, the figures behind the bill.
+"""
 
 from typing import Any, Optional
 
+from rich.console import Group
+from rich.style import Style
+from rich.table import Table
 from rich.text import Text
-from textual.containers import Horizontal, Vertical
-from textual.widgets import DataTable, SelectionList, Static
-from textual_plotext import PlotextPlot
+from textual.containers import VerticalScroll
+from textual.widgets import Static
 
 from pipecat_tail.state import WorkerSession, percentile
+from pipecat_tail.widgets import palette
+from pipecat_tail.widgets.graphics import cells, pack, sparkline
 from pipecat_tail.widgets.render import (
     FROST_BLUE,
-    FROST_CYAN,
-    GREEN,
-    ORANGE,
-    PURPLE,
-    RED,
     STYLE_BRIGHT,
     STYLE_DIM,
     STYLE_LABEL,
     STYLE_TEXT,
-    YELLOW,
     bar,
     fmt_int,
     fmt_secs,
     fmt_secs_fixed,
 )
 
-SERIES_COLORS = [PURPLE, ORANGE, FROST_CYAN, GREEN, YELLOW, FROST_BLUE, RED]
-DEFAULT_KINDS = ("ttfb", "ttfa", "ttfat")
-Series = tuple[str, str]
+KIND_ORDER = ("ttfb", "ttfat", "ttfa", "processing")
+KIND_MEANING = {
+    "ttfb": "time to first byte",
+    "ttfat": "to the first answer token",
+    "ttfa": "to the first audio",
+    "processing": "total processing",
+}
+SPARK_POINTS = 30
+"""How many recent measurements a row's sparkline shows."""
 
 
-class SeriesSelector(SelectionList):
-    """Which latency series the chart shows."""
+def _ms(seconds: Optional[float]) -> str:
+    if seconds is None:
+        return "—"
+    return f"{seconds * 1000:.0f} ms" if seconds < 1 else f"{seconds:.2f} s"
 
-    def __init__(self):
-        """Create the selector."""
-        super().__init__(id="series")
-        self.border_title = "Series"
-        self._known: list[Series] = []
 
-    def sync(self, session: WorkerSession) -> None:
-        """Add any series the session has that the list does not."""
-        for series in session.metrics:
-            if series in self._known:
+def _short(name: str) -> str:
+    return name[:-2] if name.endswith("#0") else name
+
+
+def _services(session: WorkerSession) -> list[str]:
+    """Services with metrics or usage, in pipeline order, then any others."""
+    seen = {processor for processor, _ in session.metrics} | {
+        processor for processor, _ in session.usage
+    }
+    ordered = [name for name in session.processors if name in seen]
+    return ordered + sorted(seen - set(ordered))
+
+
+def latency_rows(session: WorkerSession, width: int) -> Group | Text:
+    """One row per service metric: a sparkline of recent values, then last, median, worst.
+
+    Each service is named once, above its metrics, in its color. Columns come
+    in order of importance and only while they fit; a number is never cut.
+    """
+    p = palette.current()
+    if not session.metrics:
+        return Text(
+            "No service metrics yet. They arrive with enable_metrics=True in PipelineParams, "
+            "which the setup file turns on.",
+            style=Style(color=p.muted),
+        )
+    rows: list[tuple[str, dict[str, Text]]] = []
+    kinds_seen: list[str] = []
+    for processor in _services(session):
+        color = palette.processor_color(processor)
+        kinds = [k for k in KIND_ORDER if (processor, k) in session.metrics]
+        kinds += sorted(k for (proc, k) in session.metrics if proc == processor and k not in kinds)
+        for kind in kinds:
+            values = [m.seconds for m in session.metrics[(processor, kind)]]
+            if kind == "processing" and max(values) < 0.001:
                 continue
-            self._known.append(series)
-            processor, kind = series
-            index = len(self._known) - 1
-            label = Text()
-            label.append(f"{kind:<11}", style=STYLE_TEXT)
-            label.append(processor, style=STYLE_DIM)
-            self.add_option((label, index, kind in DEFAULT_KINDS))
-
-    def selected_series(self) -> list[Series]:
-        """The series currently ticked, in the order they were first seen."""
-        return [self._known[i] for i in sorted(self.selected) if i < len(self._known)]
-
-    def color_for(self, series: Series) -> str:
-        """Stable color for a series."""
-        try:
-            return SERIES_COLORS[self._known.index(series) % len(SERIES_COLORS)]
-        except ValueError:
-            return SERIES_COLORS[0]
-
-
-class LatencyChart(PlotextPlot):
-    """Line chart of the selected latency series over time."""
-
-    def __init__(self):
-        """Create the chart."""
-        super().__init__(id="latency-chart")
-        self.border_title = "Service latency"
-        self._session: Optional[WorkerSession] = None
-        self._series: list[Series] = []
-        self._colors: dict[Series, str] = {}
-
-    def on_mount(self) -> None:
-        """Set up the plot once."""
-        self.plt.xlabel("turn")
-        self.plt.ylabel("seconds")
-
-    def set_data(
-        self, session: WorkerSession, series: list[Series], colors: dict[Series, str]
-    ) -> None:
-        """Choose what to plot and replot."""
-        self._session = session
-        self._series = series
-        self._colors = colors
-        self.replot()
-
-    def replot(self) -> None:
-        """Redraw the chart."""
-        plt = self.plt
-        plt.clear_data()
-        plt.clear_figure()
-        plt.xlabel("measurement")
-        plt.ylabel("seconds")
-        session = self._session
-        has_data = False
-        if session is not None:
-            for series in self._series:
-                points = session.metrics.get(series)
-                if not points:
-                    continue
-                ys = [p.seconds for p in points]
-                xs = list(range(1, len(ys) + 1))
-                processor, kind = series
-                label = f"{kind} {processor}"
-                plt.plot(xs, ys, marker="braille", label=label, color=self._colors.get(series))
-                has_data = True
-        if has_data:
-            plt.ylim(0, None)
-            longest = max(len(session.metrics.get(s, ())) for s in self._series) if session else 1
-            if longest <= 20:
-                plt.xticks(list(range(1, max(longest, 2) + 1)))
-        else:
-            plt.plot([0], [0], marker="dot", color=FROST_BLUE)
-            plt.title("No latency metrics yet: set enable_metrics=True in PipelineParams")
-        self.refresh()
-
-
-class SummaryTable(DataTable):
-    """Last, average and p95 of every latency series, plus usage totals."""
-
-    def __init__(self):
-        """Create the table."""
-        super().__init__(id="summary-table", cursor_type="none", zebra_stripes=True)
-        self.border_title = "Summary"
-
-    def on_mount(self) -> None:
-        """Add the columns."""
-        self.add_columns("service", "kind", "last", "avg", "p95", "n", "detail")
-
-    def sync(self, session: WorkerSession) -> None:
-        """Rebuild the rows from a session, one service at a time, alphabetically."""
-        self.clear()
-        rows: list[tuple[tuple, tuple]] = []
-        for (processor, kind), points in session.metrics.items():
-            values = [p.seconds for p in points]
-            last = values[-1]
-            avg = sum(values) / len(values)
-            p95 = percentile(values, 0.95)
-            extra = ""
-            tail = points[-1].extra
-            if tail.get("thinking_time_secs") is not None:
-                extra = f"thinking {fmt_secs(tail['thinking_time_secs'])}"
-            elif tail.get("leading_silence_secs") is not None:
-                extra = f"leading silence {fmt_secs(tail['leading_silence_secs'])}"
-            model = points[-1].model
-            if model:
-                extra = f"{model}  {extra}".strip()
+            if kind not in kinds_seen:
+                kinds_seen.append(kind)
+            recent = values[-SPARK_POINTS:]
+            extra = session.metrics[(processor, kind)][-1].extra
+            note = ""
+            if extra.get("thinking_time_secs") is not None:
+                note = f"thinking {_ms(extra['thinking_time_secs'])}"
+            elif extra.get("leading_silence_secs") is not None:
+                note = f"leading silence {_ms(extra['leading_silence_secs'])}"
             rows.append(
                 (
-                    (processor.lower(), 0, kind),
-                    (
-                        processor,
-                        kind,
-                        Text(fmt_secs_fixed(last), style=STYLE_BRIGHT),
-                        fmt_secs_fixed(avg),
-                        fmt_secs_fixed(p95),
-                        str(len(values)),
-                        extra,
-                    ),
+                    processor,
+                    {
+                        "metric": Text(kind, style=Style(color=p.text)),
+                        "recent": sparkline(recent, lambda v, c=color: c, lo=0.0),
+                        "last": Text(_ms(values[-1]), style=Style(color=p.bright, bold=True)),
+                        "median": Text(_ms(percentile(values, 0.5)), style=Style(color=p.text)),
+                        "worst": Text(_ms(max(values)), style=Style(color=p.text)),
+                        "n": Text(str(len(values)), style=Style(color=p.dim)),
+                        "note": Text(note, style=Style(color=p.muted)),
+                    },
                 )
             )
-        for (processor, kind), totals in session.usage.items():
-            if kind == "llm":
-                detail = (
-                    f"prompt {fmt_int(totals.prompt_tokens)} · "
-                    f"completion {fmt_int(totals.completion_tokens)}"
-                )
-                if totals.cache_read_input_tokens:
-                    detail += f" · cache read {fmt_int(totals.cache_read_input_tokens)}"
-                if totals.reasoning_tokens:
-                    detail += f" · reasoning {fmt_int(totals.reasoning_tokens)}"
-                if totals.input_audio_tokens or totals.output_audio_tokens:
-                    detail += (
-                        f" · audio {fmt_int(totals.input_audio_tokens)} in"
-                        f" / {fmt_int(totals.output_audio_tokens)} out"
+    if not rows:
+        # Only processing times too small to show so far.
+        return Text("No service measurements yet.", style=Style(color=p.muted))
+    order = ["metric", "last", "recent", "median", "worst", "n", "note"]
+    widths = {c: max(len(c), *(r[c].cell_len for _, r in rows)) for c in order}
+    # As wide as the measurements so far, up to the window.
+    widths["recent"] = max(8, min(SPARK_POINTS, max(r["recent"].cell_len for _, r in rows)))
+    shown: list[str] = []
+    used = 1  # the indent; every column then takes its width and a gap of 2
+    for column in order:
+        need = widths[column] + 2
+        if column == "recent" and used + need > width:
+            # A shorter sparkline beats none.
+            widths["recent"] = max(8, width - used - 2)
+            need = widths["recent"] + 2
+        if used + need > width:
+            if column in ("recent", "note"):
+                continue
+            break
+        shown.append(column)
+        used += need
+    shown = [c for c in order if c in shown]
+
+    def justify(column: str) -> str:
+        return "right" if column in ("last", "median", "worst", "n") else "left"
+
+    def line(row: dict[str, Text]) -> Text:
+        parts = [(Text(""), 1, "left")]
+        for column in shown:
+            cell = row[column]
+            if column == "recent" and cell.cell_len > widths["recent"]:
+                cell = cell[-widths["recent"] :]
+            last = column == shown[-1] and column == "note"
+            parts.append((cell, 0 if last else widths[column], justify(column)))
+        out = cells(parts)
+        if out.cell_len > width:
+            out.truncate(width, overflow="ellipsis")
+        return out
+
+    header = {c: Text("" if c == "note" else c, style=Style(color=p.muted)) for c in shown}
+    blocks: list[Any] = [line(header)]
+    for processor in dict.fromkeys(proc for proc, _ in rows):
+        color = palette.processor_color(processor)
+        name = Text("◆ ", style=Style(color=color))
+        name.append(_short(processor), style=Style(color=p.bright, bold=True))
+        blocks.append(name)
+        for _, row in (r for r in rows if r[0] == processor):
+            blocks.append(line(row))
+    key = [
+        Text(kind, style=Style(color=p.text))
+        + Text(f" {KIND_MEANING[kind]}", style=Style(color=p.muted))
+        for kind in kinds_seen
+        if kind in KIND_MEANING
+    ]
+    return Group(*pack(key, width, sep="   "), Text(""), *blocks)
+
+
+def usage_rows(session: WorkerSession, width: int) -> Group | Text:
+    """What each service used: tokens, characters, audio. The billing figures."""
+    p = palette.current()
+    if not session.usage:
+        return Text(
+            "No usage yet. It arrives with enable_usage_metrics=True in PipelineParams, "
+            "which the setup file turns on.",
+            style=Style(color=p.muted),
+        )
+    lines: list[Any] = []
+    for processor in _services(session):
+        for (proc, kind), totals in session.usage.items():
+            if proc != processor:
+                continue
+            color = palette.processor_color(processor)
+            head = Text("◆ ", style=Style(color=color))
+            head.append(_short(processor), style=Style(color=p.bright, bold=True))
+            if totals.model:
+                head.append(f"  {totals.model}", style=Style(color=p.muted))
+            items: list[Text] = []
+
+            def item(value: str, label: str) -> None:
+                items.append(
+                    Text.assemble(
+                        (value, Style(color=p.bright, bold=True)),
+                        (f" {label}", Style(color=p.muted)),
                     )
-                value = fmt_int(totals.total_tokens)
-                label = "tokens"
-            elif kind == "tts":
-                value = fmt_int(totals.characters)
-                label = "characters"
-                detail = totals.model or ""
-            elif kind == "stt":
-                value = f"{totals.audio_seconds:.1f}s"
-                label = "audio"
-                detail = totals.model or ""
-            else:
-                value = str(totals.count)
-                label = kind
-                detail = ""
-            rows.append(
-                (
-                    (processor.lower(), 1, label),
-                    (
-                        processor,
-                        label,
-                        Text(value, style=STYLE_BRIGHT),
-                        "",
-                        "",
-                        str(totals.count),
-                        detail,
-                    ),
                 )
-            )
-        for _, row in sorted(rows, key=lambda item: item[0]):
-            self.add_row(*row)
+
+            if kind == "llm":
+                item(fmt_int(totals.prompt_tokens), "tokens in")
+                item(fmt_int(totals.completion_tokens), "out")
+                if totals.prompt_tokens and totals.cache_read_input_tokens:
+                    share = totals.cache_read_input_tokens / totals.prompt_tokens
+                    item(f"{share:.0%}", "cached")
+                if totals.reasoning_tokens:
+                    item(fmt_int(totals.reasoning_tokens), "reasoning")
+                if totals.input_audio_tokens or totals.output_audio_tokens:
+                    item(
+                        f"{fmt_int(totals.input_audio_tokens)} / "
+                        f"{fmt_int(totals.output_audio_tokens)}",
+                        "audio tokens in / out",
+                    )
+                item(fmt_int(totals.count), "requests")
+            elif kind == "tts":
+                item(fmt_int(totals.characters), "characters")
+                item(fmt_int(totals.count), "requests")
+            elif kind == "stt":
+                item(f"{totals.audio_seconds:.1f} s", "of audio")
+            else:
+                item(fmt_int(totals.count), kind)
+            lines.append(head)
+            lines.extend(pack(items, width, sep=" · ", indent=2))
+    return Group(*lines)
+
+
+class MetricsView(VerticalScroll):
+    """The Metrics tab: latency per service, then usage."""
+
+    def __init__(self):
+        """Create the tab."""
+        super().__init__(id="metrics-view")
+        self.latency = Static(id="service-latency")
+        self.usage = Static(id="usage")
+        self._session: Optional[WorkerSession] = None
+        self.can_focus = False
+
+    def compose(self):
+        """Lay out latency over usage."""
+        yield self.latency
+        yield self.usage
+
+    def on_mount(self) -> None:
+        """Title the sections."""
+        self.latency.border_title = f"service latency · last {SPARK_POINTS} measurements"
+        self.usage.border_title = "usage"
+
+    def set_session(self, session: WorkerSession) -> None:
+        """Scope every section to a session."""
+        self._session = session
+        self.refresh_view()
+
+    def on_resize(self) -> None:
+        """Fit the sections to the new width."""
+        self.refresh_view()
+
+    def refresh_view(self) -> None:
+        """Re-render both sections."""
+        session = self._session
+        if session is None:
+            return
+        width = max(20, (self.size.width or 120) - 4)
+        self.latency.update(latency_rows(session, width))
+        self.usage.update(usage_rows(session, width))
 
 
 def _startup_total(timing: dict[str, Any]) -> float:
@@ -230,7 +276,7 @@ class StartupPanel(Static):
     def __init__(self):
         """Create the panel."""
         super().__init__(Text(""), id="startup")
-        self.border_title = "Startup"
+        self.border_title = "startup"
         self._session: Optional[WorkerSession] = None
 
     def set_session(self, session: WorkerSession) -> None:
@@ -258,87 +304,62 @@ class StartupPanel(Static):
         timings = [t for t in report.get("processor_timings", []) if isinstance(t, dict)]
         # Slowest first: setup plus start is what delays the pipeline.
         timings.sort(key=_startup_total, reverse=True)
-        name_width = max([len(str(t.get("processor_name", ""))) for t in timings] + [9])
-        name_width = min(name_width, 40)
-        bar_width = max(self.size.width - name_width - 26, 10)
+        avail = max(20, self.size.width - 2)
+        name_width = min(max([len(str(t.get("processor_name", ""))) for t in timings] + [9]), 40)
+        # Columns in order of importance: setup, start, then a bar.
+        with_start = name_width + 20 <= avail
+        with_bar = name_width + 30 <= avail
+        two_lines = name_width + 10 > avail
+        bar_width = avail - name_width - 22
         longest = max([float(t.get("duration_secs", 0.0) or 0.0) for t in timings] + [0.001])
-        text.append(f"{'processor':<{name_width}}  {'setup':>8}  {'start':>8}\n", style=STYLE_LABEL)
+        if not two_lines:
+            text.append(f"{'processor':<{name_width}}  {'setup':>8}", style=STYLE_LABEL)
+            if with_start:
+                text.append(f"  {'start':>8}", style=STYLE_LABEL)
+            text.append("\n")
         for timing in timings:
             name = str(timing.get("processor_name", "?"))
             setup = float(timing.get("setup_duration_secs", 0.0) or 0.0)
             start = float(timing.get("start_duration_secs", 0.0) or 0.0)
             duration = float(timing.get("duration_secs", setup + start) or 0.0)
+            if two_lines:
+                # Too narrow for columns: the name, then its times under it.
+                text.append(f"{name}\n", style=STYLE_TEXT)
+                text.append("  setup ", style=STYLE_LABEL)
+                text.append(fmt_secs(setup), style=STYLE_BRIGHT)
+                text.append("  start ", style=STYLE_LABEL)
+                text.append(f"{fmt_secs(start)}\n", style=STYLE_DIM)
+                continue
             text.append(f"{name[:name_width]:<{name_width}}  ", style=STYLE_TEXT)
-            text.append(f"{fmt_secs(setup):>8}  ", style=STYLE_BRIGHT)
-            text.append(f"{fmt_secs(start):>8}  ", style=STYLE_DIM)
-            text.append_text(bar(duration / longest, bar_width, FROST_BLUE, empty=" "))
+            text.append(f"{fmt_secs(setup):>8}", style=STYLE_BRIGHT)
+            if with_start:
+                text.append(f"  {fmt_secs(start):>8}", style=STYLE_DIM)
+            if with_bar:
+                text.append("  ")
+                text.append_text(bar(duration / longest, bar_width, FROST_BLUE, empty=" "))
             text.append("\n")
         text.append("\n")
-        text.append("setup phase ", style=STYLE_LABEL)
-        text.append(fmt_secs_fixed(report.get("setup_phase_secs")), style=STYLE_BRIGHT)
-        text.append("   start phase ", style=STYLE_LABEL)
-        text.append(fmt_secs_fixed(report.get("start_phase_secs")), style=STYLE_BRIGHT)
-        text.append("   total ", style=STYLE_LABEL)
-        text.append(fmt_secs_fixed(report.get("total_duration_secs")), style=STYLE_BRIGHT)
+        items: list[Text] = []
+
+        def item(label: str, value: str, style=STYLE_BRIGHT) -> None:
+            items.append(Text(f"{label} ", style=STYLE_LABEL) + Text(value, style=style))
+
+        item("setup phase", fmt_secs_fixed(report.get("setup_phase_secs")))
+        item("start phase", fmt_secs_fixed(report.get("start_phase_secs")))
+        item("total", fmt_secs_fixed(report.get("total_duration_secs")))
         warmup = report.get("warmup")
         if isinstance(warmup, dict):
-            text.append("   warm-up ", style=STYLE_LABEL)
-            text.append(fmt_secs_fixed(warmup.get("duration_secs")), style=STYLE_TEXT)
-            text.append(
-                f" ({fmt_secs(warmup.get('blocking_duration_secs'))} blocking)", style=STYLE_DIM
+            item(
+                "warm-up",
+                f"{fmt_secs_fixed(warmup.get('duration_secs'))} "
+                f"({fmt_secs(warmup.get('blocking_duration_secs'))} blocking)",
+                STYLE_TEXT,
             )
         transport = session.transport_timing if session else None
         if isinstance(transport, dict):
             if transport.get("bot_connected_secs") is not None:
-                text.append("   bot connected ", style=STYLE_LABEL)
-                text.append(fmt_secs_fixed(transport["bot_connected_secs"]), style=STYLE_BRIGHT)
+                item("bot connected", fmt_secs_fixed(transport["bot_connected_secs"]))
             if transport.get("client_connected_secs") is not None:
-                text.append("   client connected ", style=STYLE_LABEL)
-                text.append(fmt_secs_fixed(transport["client_connected_secs"]), style=STYLE_BRIGHT)
+                item("client connected", fmt_secs_fixed(transport["client_connected_secs"]))
+        text.append_text(Text("\n").join(pack(items, avail)))
         return text
-
-
-class MetricsView(Vertical):
-    """The Metrics tab."""
-
-    def __init__(self):
-        """Create the tab."""
-        super().__init__(id="metrics-view")
-        self.selector = SeriesSelector()
-        self.chart = LatencyChart()
-        self.summary = SummaryTable()
-        self.startup = StartupPanel()
-        self._session: Optional[WorkerSession] = None
-
-    def compose(self):
-        """Compose the chart beside the selector, then summary and startup."""
-        with Horizontal(id="metrics-top"):
-            yield self.chart
-            yield self.selector
-        yield self.summary
-        yield self.startup
-
-    def set_session(self, session: WorkerSession) -> None:
-        """Scope every panel to a session."""
-        self._session = session
-        self.startup.set_session(session)
-        self.refresh_view()
-
-    def refresh_view(self) -> None:
-        """Re-render the chart and the summary."""
-        session = self._session
-        if session is None:
-            return
-        self.selector.sync(session)
-        series = self.selector.selected_series()
-        colors = {s: self.selector.color_for(s) for s in series}
-        self.chart.set_data(session, series, colors)
-        self.summary.sync(session)
-
-    def refresh_startup(self) -> None:
-        """Re-render the startup panel."""
-        self.startup.refresh_view()
-
-    def on_selection_list_selected_changed(self, _event) -> None:
-        """Replot when the ticked series change."""
-        self.refresh_view()
