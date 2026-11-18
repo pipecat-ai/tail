@@ -337,6 +337,43 @@ def test_turn_events_start_with_the_users_own_words():
 
 
 @pytest.mark.asyncio
+async def test_pipeline_view_says_a_lone_observer_cannot_see_the_runner():
+    app = TailApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await app.handle_status("connected")
+
+        async def ready(**data):
+            data.setdefault("capabilities", ["conversation", "workers"])
+            await app.handle_message(
+                {"label": "tail", "type": "tail-ready", "timestamp": time.time(), "data": data}
+            )
+            await app.handle_message(
+                {
+                    "label": "tail",
+                    "type": "tail-pipeline-started",
+                    "worker": "bot-1",
+                    "timestamp": time.time(),
+                    "data": {"processors": ["stt", "llm", "tts"]},
+                }
+            )
+            await pilot.pause(0.2)
+
+        await ready(standalone=True)
+        view = app.pipeline_view
+        assert view.worker_tree.border_title == "workers · needs a TailServer"
+        assert view.bus.border_title.endswith("· needs a TailServer")
+        # The worker is listed on its own, without a made-up runner above it.
+        assert not view.worker_tree.show_root
+        assert "bot-1" in str(view.worker_tree.root.children[0].label)
+
+        # The bot comes back with a TailServer: the runner is there again.
+        await ready(runner="runner-1")
+        assert view.worker_tree.border_title == "workers"
+        assert "needs" not in view.bus.border_title
+        assert view.worker_tree.show_root
+
+
+@pytest.mark.asyncio
 async def test_title_says_how_the_call_is_going():
     app = TailApp()
     async with app.run_test(size=(120, 40)) as pilot:

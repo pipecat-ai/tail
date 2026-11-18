@@ -568,6 +568,9 @@ class TailObserver(BaseObserver):
     async def _on_client_connected(self):
         ready = TailReadyMessage()
         ready.data["capabilities"] = compat.capabilities()
+        # Serving its own websocket, the observer reports one pipeline: the
+        # runner's workers, jobs and bus need a TailServer.
+        ready.data["standalone"] = True
         await self.send_tail_message(ready)
 
     #

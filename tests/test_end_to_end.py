@@ -326,6 +326,8 @@ async def test_standalone_observer_serves_a_websocket():
     types = [m["type"] for m in messages]
     assert types[0] == "tail-ready"
     assert "capabilities" in messages[0]["data"]
+    # On its own the observer can't report the runner, and says so.
+    assert messages[0]["data"]["standalone"] is True
     assert_conversation(types)
     assert types[-1] == "tail-pipeline-finished"
 
@@ -359,6 +361,7 @@ async def test_worker_runner_with_tail_server():
     if hasattr(tail, "worker_runner"):
         assert messages[0]["data"]["runner"] == runner.name
     assert "workers" in messages[0]["data"]["capabilities"]
+    assert "standalone" not in messages[0]["data"]
     assert_conversation(types)
     assert_metrics(messages)
     assert "tail-pipeline-started" in types

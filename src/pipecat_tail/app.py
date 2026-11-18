@@ -407,14 +407,20 @@ class TailApp(App):
             self.logs_view.refresh_pinned()
 
     def _explain_pipeline_panels(self) -> None:
-        # Pipecat before 1.3 runs pipelines as tasks: no workers, jobs or bus.
         caps = self.state.capabilities
         if caps and "workers" not in caps:
+            # Pipecat before 1.3 runs pipelines as tasks: no workers, jobs or bus.
             note = "needs Pipecat 1.3+ (WorkerRunner)"
-            self.pipeline_view.worker_tree.border_title = f"workers · {note}"
-            self.pipeline_view.jobs.border_title = f"jobs · {note}"
-            self.pipeline_view.bus.note = note
-            self.pipeline_view.bus._update_subtitle()
+        elif self.state.info.get("standalone"):
+            # A TailObserver on its own sees its pipeline, not the runner.
+            note = "needs a TailServer"
+        else:
+            note = ""
+        view = self.pipeline_view
+        view.worker_tree.border_title = f"workers · {note}" if note else "workers"
+        view.jobs.border_title = f"jobs · {note}" if note else "jobs"
+        view.bus.note = note
+        view.bus._update_subtitle()
 
     def _tick(self) -> None:
         """Animate what moves with time, and only that.
