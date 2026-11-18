@@ -262,6 +262,29 @@ async def test_log_level_and_search_filters():
 
 
 @pytest.mark.asyncio
+async def test_logs_keep_coming_once_the_record_list_is_full():
+    from pipecat_tail.state import MAX_LOGS, LogRecord
+
+    app = TailApp()
+    async with app.run_test(size=(150, 46)) as pilot:
+        await feed(app, pilot, until=5.0)
+        # A long call: the state keeps only the latest records.
+        old = LogRecord(time="", level="DEBUG", name="bot", function="", line=0, message="old")
+        app.state.logs.extend([old] * MAX_LOGS)
+        await app.handle_message(
+            {
+                "label": "tail",
+                "type": "tail-log",
+                "timestamp": time.time(),
+                "data": {"level": "INFO", "name": "bot", "message": "still here"},
+            }
+        )
+        await pilot.press("5")
+        await pilot.pause(0.3)
+        assert "still here" in "\n".join(str(line.text) for line in app.logs_view.lines.lines)
+
+
+@pytest.mark.asyncio
 async def test_layout_fits_small_terminals():
     app = TailApp()
     async with app.run_test(size=(80, 24)) as pilot:

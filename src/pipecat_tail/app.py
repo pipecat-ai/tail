@@ -26,7 +26,7 @@ it from a websocket or the demo, and ``TailRunner`` from a queue.
 
 import time
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional, Sequence
 
 from textual import events, on
 from textual.app import App, ComposeResult
@@ -179,6 +179,10 @@ class PipelineView(Vertical):
                 yield self.worker_tree
                 yield self.jobs
         yield self.bus
+
+
+def _newest(records: Sequence[Any]) -> Any:
+    return records[-1] if records else None
 
 
 class TailApp(App):
@@ -339,15 +343,16 @@ class TailApp(App):
         Args:
             message: A decoded wire message.
         """
-        before_bus = len(self.state.bus)
-        before_logs = len(self.state.logs)
+        last_bus = _newest(self.state.bus)
+        last_log = _newest(self.state.logs)
         before_workers = set(self.state.sessions)
         areas = self.state.apply(message)
         if not areas:
             return
-        if BUS in areas and len(self.state.bus) > before_bus:
+        # The record lists are capped, so a new record shows as a new last one.
+        if BUS in areas and _newest(self.state.bus) is not last_bus:
             self._new_bus.append(self.state.bus[-1])
-        if LOGS in areas and len(self.state.logs) > before_logs:
+        if LOGS in areas and _newest(self.state.logs) is not last_log:
             self._new_logs.append(self.state.logs[-1])
         if set(self.state.sessions) != before_workers:
             areas |= {WORKERS, STRIP, FLOW}
