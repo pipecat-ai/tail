@@ -26,6 +26,21 @@ from pipecat_tail.widgets.graphics import block_wave, overlay, pad, spinner
 
 LABEL_WIDTH = 6
 WINDOWS = (10.0, 20.0, 40.0, 60.0)
+# Once the call is over the timelines stop this long after its last event.
+CALL_END_MARGIN_SECS = 1.0
+
+
+def timeline_end(state: SessionState, session: WorkerSession) -> tuple[float, bool]:
+    """Where a timeline ends, and whether that is the end of the call.
+
+    While the call is on, timelines end now and scroll. Once it is over they
+    stop where it ended, so they keep showing it.
+    """
+    now = state.now()
+    end = state.call_end(session)
+    if end is None:
+        return now, False
+    return min(now, end + CALL_END_MARGIN_SECS), True
 
 
 def wave_rows_for(height: int) -> tuple[int, bool]:
@@ -122,6 +137,8 @@ class VoiceTimeline(Widget):
     def has_motion(self, now: float) -> bool:
         """Whether anything in the window moves: speech, audio or a wait."""
         session = self.state.selected
+        if self.state.call_end(session) is not None:
+            return False
         t0 = now - self.window
         if session.waiting_since is not None or session.user_speaking or session.bot_speaking:
             return True
@@ -141,7 +158,7 @@ class VoiceTimeline(Widget):
         session = self.state.selected
         width = max(10, self.size.width)
         cells = max(4, width - LABEL_WIDTH)
-        now = self.state.now()
+        now, over = timeline_end(self.state, session)
         t1 = now
         t0 = now - self.window
         dt = self.window / cells
@@ -249,14 +266,16 @@ class VoiceTimeline(Widget):
             pos = x(now - tick)
             axis = overlay(axis, pos, Text(f"╵-{tick:.0f}s", style=Style(color=p.muted)))
             tick += step
-        axis = overlay(axis, cells - 4, Text("now╵", style=Style(color=p.accent, bold=True)))
+        edge = "end╵" if over else "now╵"
+        axis = overlay(axis, cells - 4, Text(edge, style=Style(color=p.accent, bold=True)))
 
         def name(text: str, color: str) -> Text:
             return pad(Text(text, style=Style(color=color, bold=True)), LABEL_WIDTH)
 
         # Without raw VAD (no VAD in the pipeline) the lane only has turn ends.
         has_vad = "vad" in self.state.capabilities or bool(spans)
-        self.border_title = f"voice · last {self.window:.0f} s"
+        last = "the call's last" if over else "last"
+        self.border_title = f"voice · {last} {self.window:.0f} s"
         if not wave_rows:
             # Only the lanes: the turn ends and response times stay readable.
             return Group(

@@ -573,7 +573,7 @@ class TailApp(App):
     def _show_looking_back(self) -> None:
         """Give the conversation the room while looking back or after the call."""
         session = self.state.selected
-        call_over = self.state.has_bot and (self.state.status != "connected" or session.finished)
+        call_over = self.state.call_end(session) is not None
         self.live.set_looking_back(not self.live.conversation.following or call_over)
 
     def action_zoom(self, direction: int) -> None:

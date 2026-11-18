@@ -336,6 +336,70 @@ def test_turn_events_start_with_the_users_own_words():
         assert turn.user_text.startswith(said.split()[0])
 
 
+def test_speech_lanes_stop_where_the_call_ended():
+    # A call that ended a minute ago: the lanes still show it, up to its end.
+    from pipecat_tail.state import SessionState
+    from pipecat_tail.widgets.latency import speech_lanes
+
+    base = time.time() - 70
+
+    def message(label, kind, at, data=None):
+        return {
+            "label": label,
+            "type": kind,
+            "worker": "bot-1",
+            "timestamp": base + at,
+            "data": data or {},
+        }
+
+    state = SessionState()
+    state.set_status("connected")
+    for label, kind, at in [
+        ("tail", "tail-pipeline-started", 0.0),
+        ("rtvi-ai", "vad-user-started-speaking", 1.0),
+        ("rtvi-ai", "user-started-speaking", 1.0),
+        ("rtvi-ai", "vad-user-stopped-speaking", 2.0),
+        ("rtvi-ai", "user-stopped-speaking", 2.2),
+        ("rtvi-ai", "bot-started-speaking", 3.0),
+        ("rtvi-ai", "bot-stopped-speaking", 6.0),
+    ]:
+        state.apply(
+            message(label, kind, at, {"processors": []} if kind.startswith("tail") else None)
+        )
+    session = state.selected
+    # The bot's clock agrees with this one: the call was a minute ago.
+    state.clock_offset = 0.0
+    # While the call is on, a minute later the lanes have scrolled past it.
+    assert state.call_end(session) is None
+    lanes = as_text(speech_lanes(state, session, 120))
+    assert "now╵" in lanes and "━" not in lanes
+
+    state.apply(message("tail", "tail-pipeline-finished", 10.0))
+    assert state.call_end(session) == pytest.approx(base + 10.0)
+    lanes = as_text(speech_lanes(state, session, 120))
+    assert "end╵" in lanes and "now╵" not in lanes
+    assert "━" in lanes and "▆" in lanes
+
+
+@pytest.mark.asyncio
+async def test_the_voice_timeline_keeps_the_call_once_it_is_over():
+    app = TailApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await feed(app, pilot)
+        voice = app.live.voice
+        assert voice.border_title == "voice · last 20 s"
+        await app.handle_status("disconnected")
+        # A minute goes by after the bot left.
+        app.state.clock_offset = (app.state.clock_offset or 0.0) - 60
+        await pilot.pause(0.2)
+        voice.refresh()
+        await pilot.pause(0.1)
+        assert voice.border_title == "voice · the call's last 20 s"
+        assert not voice.has_motion(app.state.now())
+        # The end of the call is still there: the last answer's time.
+        assert "╰" in rendered(voice)
+
+
 @pytest.mark.asyncio
 async def test_pipeline_view_says_a_lone_observer_cannot_see_the_runner():
     app = TailApp()

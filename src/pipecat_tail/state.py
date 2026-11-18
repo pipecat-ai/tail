@@ -936,6 +936,18 @@ class SessionState:
                 session.reset_activity()
         return {STATUS, STRIP, VOICE}
 
+    def call_end(self, session: WorkerSession) -> Optional[float]:
+        """When the session's call ended, on the bot's clock, or None while it's on.
+
+        A call is over once its pipeline finished or the bot went away. It
+        ended with the last thing Tail heard about it.
+        """
+        if not self.has_bot or (self.status == "connected" and not session.finished):
+            return None
+        if session.events:
+            return session.events[-1][0]
+        return self.last_message_at if self.last_message_at is not None else self.now()
+
     def now(self) -> float:
         """The current time on the bot's clock.
 

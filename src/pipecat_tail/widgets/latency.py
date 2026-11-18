@@ -27,6 +27,7 @@ from pipecat_tail.state import LatencyRecord, SessionState, WorkerSession, perce
 from pipecat_tail.widgets import palette
 from pipecat_tail.widgets.graphics import cells, meter, overlay, pack, pad, stacked
 from pipecat_tail.widgets.render import fit_hints, fmt_secs
+from pipecat_tail.widgets.voice import timeline_end
 
 NO_DATA = (
     "No turns measured yet. Latency counts from the user going silent to the bot "
@@ -341,7 +342,7 @@ def speech_lanes(
     p = palette.current()
     label_w = 8
     cells = max(10, width - label_w)
-    now = state.now()
+    now, over = timeline_end(state, session)
     t0 = now - window
 
     def x(t: float) -> int:
@@ -375,7 +376,8 @@ def speech_lanes(
     axis = Text(" " * cells)
     for s in range(int(window), 0, -5):
         axis = overlay(axis, x(now - s), Text(f"╵-{s}s", style=Style(color=p.muted)))
-    axis = overlay(axis, cells - 4, Text("now╵", style=Style(color=p.accent, bold=True)))
+    edge = "end╵" if over else "now╵"
+    axis = overlay(axis, cells - 4, Text(edge, style=Style(color=p.accent, bold=True)))
 
     def label(text: str, color: str) -> Text:
         return pad(Text(text, style=Style(color=color, bold=True)), label_w)
@@ -503,3 +505,5 @@ class LatencyView(Vertical):
         """Redraw the speech lanes, which move with time."""
         session = self.state.selected
         self.lanes.update(speech_lanes(self.state, session, max(20, self.lanes.size.width - 2)))
+        last = "the call's last" if self.state.call_end(session) is not None else "last"
+        self.lanes.border_title = f"speech · {last} 30 s"
