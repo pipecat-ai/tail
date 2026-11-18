@@ -26,9 +26,10 @@ import asyncio
 import os
 import signal
 import sys
+import tempfile
 import threading
 from multiprocessing import Process, Queue
-from typing import Optional
+from typing import IO, Optional
 
 from loguru import logger
 from pipecat.pipeline.worker import PipelineWorker
@@ -50,35 +51,42 @@ class _TerminalOutput:
 
     The app runs in its own process, so anything this one writes to the
     terminal (logs, prints, warnings) would land on top of it. Its stdout and
-    stderr point at ``/dev/null`` meanwhile and are restored when the app
-    closes, with every log handler as it was. Output going to a file or a
-    pipe is left alone.
+    stderr go to a file meanwhile, and when the app closes they point back at
+    the terminal, which then shows what was written, as if the app had been a
+    window over it: a call that ended while the app was open still shows the
+    bot shutting down. Log handlers stay as they were, and output going to a
+    file or a pipe is left alone.
     """
 
     def __init__(self):
         self._saved: list[tuple[int, int]] = []
+        self._kept: Optional[IO[bytes]] = None
 
     def hide(self):
-        """Point stdout and stderr at ``/dev/null`` if they are a terminal."""
+        """Send stdout and stderr to a file while they are a terminal."""
         self._flush()
-        devnull = os.open(os.devnull, os.O_WRONLY)
-        try:
-            for fd in (1, 2):
-                if os.isatty(fd):
-                    self._saved.append((fd, os.dup(fd)))
-                    os.dup2(devnull, fd)
-        finally:
-            os.close(devnull)
+        self._kept = tempfile.TemporaryFile()
+        for fd in (1, 2):
+            if os.isatty(fd):
+                self._saved.append((fd, os.dup(fd)))
+                os.dup2(self._kept.fileno(), fd)
 
     def restore(self):
-        """Point stdout and stderr back where they were."""
+        """Point stdout and stderr back at the terminal, and show what they wrote."""
         if not self._saved:
             return
         self._flush()
         for fd, saved in self._saved:
             os.dup2(saved, fd)
             os.close(saved)
+        terminal = self._saved[-1][0]
         self._saved = []
+        if self._kept is not None:
+            self._kept.seek(0)
+            while chunk := self._kept.read(65536):
+                os.write(terminal, chunk)
+            self._kept.close()
+            self._kept = None
 
     def _flush(self):
         for stream in (sys.stdout, sys.stderr):

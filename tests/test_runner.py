@@ -72,14 +72,16 @@ def test_terminal_output_is_hidden_while_the_app_draws(monkeypatch, capfd):
     monkeypatch.setattr(os, "isatty", lambda fd: True)
     output = _TerminalOutput()
     output.hide()
-    os.write(1, b"hidden\n")
-    os.write(2, b"hidden\n")
+    os.write(1, b"while it draws\n")
+    os.write(2, b"worker finishing\n")
+    # Nothing reaches the terminal while the app is on it.
+    assert capfd.readouterr() == ("", "")
     output.restore()
     output.restore()
-    os.write(2, b"shown\n")
+    os.write(2, b"after\n")
+    # Then it shows what was written meanwhile, in order, as if it had been there.
     out, err = capfd.readouterr()
-    assert "hidden" not in out + err
-    assert "shown" in err
+    assert out + err == "while it draws\nworker finishing\nafter\n"
 
 
 def test_terminal_output_to_a_file_is_left_alone(monkeypatch, capfd):

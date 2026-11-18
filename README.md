@@ -140,7 +140,7 @@ await runner.add_workers(worker)
 await runner.run()
 ```
 
-While the dashboard is open the bot's output is kept off the terminal (output to a file is untouched). Quitting it with `q` stops the bot, and the bot's own log shows it shutting down. When the bot finishes first, the dashboard stays open until you quit.
+While the dashboard is open the bot's output is kept off the terminal, and shown there once it closes (output to a file is untouched). Quitting it with `q` stops the bot, and the bot's own log shows it shutting down. When the bot finishes first, the dashboard stays open until you quit.
 
 ## Pipecat versions
 
