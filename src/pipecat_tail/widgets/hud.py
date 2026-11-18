@@ -285,7 +285,7 @@ class Hud(Widget):
         record = _last_record(session)
         seconds: Optional[float] = None
         greeting = False
-        live = bot_state == THINKING and session.waiting_since is not None
+        live = bot_state == THINKING and session.is_waiting(now)
         if live and session.waiting_since is not None:
             seconds = max(0.0, now - session.waiting_since)
         elif _frozen(session, record) and session.wait_ended_at and session.wait_started_at:
@@ -339,7 +339,7 @@ class Hud(Widget):
         """
         p = palette.current()
         record = _last_record(session)
-        live = session.waiting_since is not None
+        live = session.is_waiting(now)
         if live or _frozen(session, record):
             return self._wait(session, now, width, live)
         if record is None:

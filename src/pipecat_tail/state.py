@@ -583,12 +583,16 @@ class WorkerSession:
             return IDLE
         if self.bot_speaking:
             return SPEAKING
-        if self.waiting_since is not None and now - self.waiting_since > WAITING_GIVE_UP_SECS:
-            # The bot never answered; stop counting.
-            self.waiting_since = None
-        if self.llm_active or self.waiting_since is not None:
+        if self.llm_active or self.is_waiting(now):
             return THINKING
         return LISTENING
+
+    def is_waiting(self, now: float) -> bool:
+        """Whether the user is waiting for the bot at ``now``.
+
+        A wait the bot never answers ends after ``WAITING_GIVE_UP_SECS``.
+        """
+        return self.waiting_since is not None and now - self.waiting_since <= WAITING_GIVE_UP_SECS
 
     def is_active(self, now: float) -> bool:
         """Whether anything is happening that the screen should follow closely.
@@ -600,7 +604,7 @@ class WorkerSession:
             return False
         if self.user_speaking or self.bot_speaking or self.llm_active or self.tts_active:
             return True
-        if self.waiting_since is not None:
+        if self.is_waiting(now):
             return True
         if self.user_level > 0.01 or self.bot_level > 0.01:
             return True
@@ -792,7 +796,7 @@ class WorkerSession:
         user went silent, like any other.
         """
         unheard, self.unheard_stop = self.unheard_stop, None
-        if unheard is None or self.waiting_since is not None:
+        if unheard is None or self.is_waiting(timestamp):
             return
         stopped, ruled = unheard
         if timestamp - ruled <= UNHEARD_ANSWER_SECS:
@@ -806,7 +810,7 @@ class WorkerSession:
             phase: One of ``WAIT_PHASES``.
             once: Ignore it if the phase was already reached in this wait.
         """
-        if self.waiting_since is None or self.wait_started_at is None:
+        if not self.is_waiting(timestamp) or self.wait_started_at is None:
             return
         if once and any(name == phase for _, name in self.wait_marks):
             return
@@ -822,7 +826,7 @@ class WorkerSession:
         calls, the first sentence and speech synthesis.
         """
         start = self.wait_started_at
-        if start is None or (self.waiting_since is None and self.wait_ended_at is None):
+        if start is None or (not self.is_waiting(now) and self.wait_ended_at is None):
             return []
         end = self.wait_ended_at if self.wait_ended_at is not None else max(now, start)
         marks = list(self.wait_marks)
@@ -1281,14 +1285,14 @@ class SessionState:
                 # starts over with what the user says now.
                 turn.restart(timestamp)
             session.unheard_stop = None
-            if session.waiting_since is not None:
+            if session.is_waiting(timestamp):
                 # The user went on before the bot answered.
                 session.wait_started_at = None
             session.waiting_since = None
         elif kind == "bot_speech_started":
             session.bot_spoke_since_ruling = True
             session.take_up_unheard(timestamp)
-            if session.waiting_since is not None:
+            if session.is_waiting(timestamp):
                 session.wait_ended_at = timestamp
             session.waiting_since = None
             if turn is not None and turn.bot_started_at is None:

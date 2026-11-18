@@ -702,3 +702,24 @@ def test_no_early_end_when_the_bot_answered_or_the_user_waited():
     state.apply(rtvi("user-stopped-speaking", timestamp=12.0))
     state.apply(rtvi("user-started-speaking", timestamp=16.0))
     assert session.early_end_count == 0
+
+
+def test_a_wait_the_bot_never_answers_ends_however_it_is_read():
+    # Reading the state doesn't change it: the wait ends after the give-up
+    # whether or not something asked what the bot was doing first.
+    from pipecat_tail.state import LISTENING, THINKING, WAITING_GIVE_UP_SECS
+
+    state = SessionState()
+    t = 1_000_000.0
+    for msg_type, data, at in [
+        ("user-started-speaking", None, t),
+        ("user-input", {"text": "Hello?", "final": True}, t + 1.0),
+        ("user-stopped-speaking", None, t + 1.5),
+    ]:
+        state.apply(rtvi(msg_type, data, timestamp=at))
+    session = state.selected
+    assert session.bot_state_at(t + 2.0) == THINKING
+    later = t + 1.5 + WAITING_GIVE_UP_SECS + 1
+    assert not session.is_active(later)
+    assert session.bot_state_at(later) == LISTENING
+    assert not session.is_active(later)

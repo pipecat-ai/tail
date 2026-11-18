@@ -20,7 +20,7 @@ from rich.style import Style
 from rich.text import Text
 from textual.widget import Widget
 
-from pipecat_tail.state import SessionState, WorkerSession
+from pipecat_tail.state import THINKING, SessionState, WorkerSession
 from pipecat_tail.widgets import palette
 from pipecat_tail.widgets.graphics import block_wave, overlay, pad, spinner
 
@@ -140,7 +140,7 @@ class VoiceTimeline(Widget):
         if self.state.call_end(session) is not None:
             return False
         t0 = now - self.window
-        if session.waiting_since is not None or session.user_speaking or session.bot_speaking:
+        if session.is_waiting(now) or session.user_speaking or session.bot_speaking:
             return True
         if session.speech and session.speech[-1].timestamp >= t0:
             return True
@@ -235,9 +235,9 @@ class VoiceTimeline(Widget):
                 brackets = overlay(
                     brackets, xb + 1, Text(label, style=Style(color=color, bold=True))
                 )
-        if session.waiting_since is not None and session.bot_state_at(now) == "thinking":
+        if session.is_waiting(now) and session.bot_state_at(now) == THINKING:
             # The wait still open: an arrow to now. The HUD's clock counts it.
-            xa = max(0, x(session.waiting_since))
+            xa = max(0, x(session.waiting_since or now))
             span = max(2, min(cells - 1, x(now)) - xa + 1)
             text = Text("╰" + "─" * (span - 2) + "▸", style=Style(color=p.llm))
             brackets = overlay(brackets, min(xa, cells - text.cell_len), text)
