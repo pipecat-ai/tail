@@ -17,6 +17,12 @@ or keep the bot untouched and attach Tail from outside::
         uv run --group examples examples/bot.py
     pipecat tail
 
+or add a ``TailObserver`` to the pipeline worker, as you would in your own
+code, and open the dashboard in another terminal::
+
+    TAIL_RUNNER=observer uv run --group examples examples/bot.py
+    pipecat tail
+
 The ``examples`` dependency group in ``pyproject.toml`` installs the
 services and transports it uses. Needs DEEPGRAM_API_KEY, OPENAI_API_KEY and
 CARTESIA_API_KEY in the environment or a ``.env`` file.
@@ -44,7 +50,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.runner import WorkerRunner
 
-from pipecat_tail import TailRunner
+from pipecat_tail import TailObserver, TailRunner
 
 load_dotenv(override=True)
 
@@ -93,11 +99,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]
     )
 
+    mode = os.getenv("TAIL_RUNNER", "1")
+
     # Metrics are what feed the latency breakdown and the Metrics tab.
     worker = PipelineWorker(
         pipeline,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        # The observer serves its own websocket for `pipecat tail`.
+        observers=[TailObserver()] if mode == "observer" else [],
     )
 
     @transport.event_handler("on_client_connected")
@@ -111,12 +121,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Client disconnected")
         await worker.cancel()
 
-    if os.getenv("TAIL_RUNNER", "1") == "1":
+    if mode == "1":
         # The dashboard opens in this terminal and the bot's logs go to it.
         runner = TailRunner()
     else:
-        # Plain runner: attach Tail through PIPECAT_SETUP_FILES and run
-        # `pipecat tail` in another terminal.
+        # Plain runner: Tail comes from the observer above or from
+        # PIPECAT_SETUP_FILES, and `pipecat tail` runs in another terminal.
         runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.add_workers(worker)

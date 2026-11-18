@@ -204,6 +204,8 @@ uv run pytest
 uv run --group examples examples/bot.py
 ```
 
+That opens the dashboard in the same terminal with `TailRunner` (option C). `TAIL_RUNNER=observer` runs it with a `TailObserver` instead (option B), and `TAIL_RUNNER=0` with neither, for the setup file (option A); then run `pipecat tail` in another terminal.
+
 Changes are recorded as [towncrier](https://towncrier.readthedocs.io/) fragments in `changelog/`.
 
 ## 📚 Next steps
