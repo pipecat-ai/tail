@@ -319,6 +319,11 @@ def save_report(state: SessionState, directory: Path = Path(".")) -> tuple[Path,
     )
 
 
+def _key(session: WorkerSession, turn: Turn) -> tuple:
+    # Not id(turn): the session drops old turns, and their ids get reused.
+    return (session.name, turn.number, turn.started_at)
+
+
 class JsonStream:
     """``pipecat tail --json``: the session as JSON lines, no UI.
 
@@ -340,7 +345,7 @@ class JsonStream:
         self.out = out
         self.report_path = report_path
         self.state = SessionState()
-        self._emitted: set[int] = set()
+        self._emitted: set[tuple] = set()
         self._finished: set[Optional[str]] = set()
         self._errors = 0
         self._done = asyncio.Event()
@@ -383,7 +388,7 @@ class JsonStream:
             self._errors += 1
         for session in self.state.sessions.values():
             for turn in session.turns:
-                if turn.ended and turn.has_content and id(turn) not in self._emitted:
+                if turn.ended and turn.has_content and _key(session, turn) not in self._emitted:
                     self._emit_turn(session, turn)
         if msg_type == "tail-pipeline-finished":
             self._finish_session(self.state.session(worker if isinstance(worker, str) else None))
@@ -398,7 +403,7 @@ class JsonStream:
         self._done.set()
 
     def _emit_turn(self, session: WorkerSession, turn: Turn) -> None:
-        self._emitted.add(id(turn))
+        self._emitted.add(_key(session, turn))
         self.emit("turn", worker=session.name, **turn_record(turn))
 
     def _finish_session(self, session: WorkerSession) -> None:
@@ -406,7 +411,7 @@ class JsonStream:
             return
         self._finished.add(session.name)
         for turn in session.turns:
-            if turn.has_content and id(turn) not in self._emitted:
+            if turn.has_content and _key(session, turn) not in self._emitted:
                 self._emit_turn(session, turn)
         self.emit("session_finished", **session_summary(self.state, session))
 

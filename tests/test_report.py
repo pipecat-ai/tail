@@ -3,6 +3,8 @@
 import io
 import json
 
+import pytest
+
 from pipecat_tail import demo
 from pipecat_tail.report import JsonStream, markdown, report, save_report
 from pipecat_tail.state import SessionState
@@ -65,3 +67,19 @@ async def test_json_stream_prints_turns_errors_and_a_summary(tmp_path):
     assert kinds[-1] == "session_finished"
     assert events[-1]["turn_count"] == 8
     assert (tmp_path / "report.md").read_text().startswith("# Tail report")
+
+
+@pytest.mark.asyncio
+async def test_json_stream_prints_every_turn_whatever_python_ids_it_gets(monkeypatch):
+    # Turns a long session dropped free their ids for new turns: pretend every
+    # turn gets the same one.
+    from pipecat_tail import report as report_module
+
+    monkeypatch.setattr(report_module, "id", lambda _obj: 1, raising=False)
+    out = io.StringIO()
+    stream = JsonStream("ws://unused", out=out)
+    for message in demo.messages(base=1_000_000.0):
+        await stream.on_message(message)
+    stream.finish()
+    kinds = [json.loads(line)["event"] for line in out.getvalue().splitlines()]
+    assert kinds.count("turn") == 8
