@@ -385,6 +385,8 @@ class TailApp(App):
             self.banner.update_from(self.state)
         if CONVERSATION in dirty:
             self.live.conversation.sync(session)
+        if VOICE in dirty:
+            self.live.voice.refresh()
         if LATENCY in dirty:
             self.latency_view.refresh_view()
             self.hud.refresh()

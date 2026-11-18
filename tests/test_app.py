@@ -411,15 +411,16 @@ async def test_the_voice_timeline_keeps_the_call_once_it_is_over():
         await feed(app, pilot)
         voice = app.live.voice
         assert voice.border_title == "voice · last 20 s"
-        await app.handle_status("disconnected")
-        # A minute goes by after the bot left.
-        app.state.clock_offset = (app.state.clock_offset or 0.0) - 60
+        # Already looking back, so the timeline keeps its size when the call
+        # ends: it redraws because what it shows changed.
+        await pilot.press("p")
         await pilot.pause(0.2)
-        voice.refresh()
-        await pilot.pause(0.1)
+        await app.handle_status("disconnected")
+        await pilot.pause(0.2)
         assert voice.border_title == "voice · the call's last 20 s"
+        # A minute later nothing moves, and the end of the call is still there.
+        app.state.clock_offset = (app.state.clock_offset or 0.0) - 60
         assert not voice.has_motion(app.state.now())
-        # The end of the call is still there: the last answer's time.
         assert "╰" in rendered(voice)
 
 
