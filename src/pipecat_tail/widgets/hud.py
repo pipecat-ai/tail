@@ -157,9 +157,12 @@ class TitleBar(Widget):
         if status == "connected" and state.has_bot and not session.finished:
             text.append("● ", style=Style(color=p.ok))
             text.append("call ", style=Style(color=p.text))
-            started = session.started_at or state.connected_at
-            if started:
-                text.append(fmt_elapsed(time.time() - started), style=Style(color=p.bright))
+            # The pipeline's start is on the bot's clock; connecting, on this one.
+            if session.started_at:
+                elapsed = state.now() - session.started_at
+            else:
+                elapsed = time.time() - (state.connected_at or time.time())
+            text.append(fmt_elapsed(elapsed), style=Style(color=p.bright))
         elif status == "connected" and session.finished:
             turns = sum(1 for t in session.turns if t.number)
             text.append("■ ", style=Style(color=p.dim))

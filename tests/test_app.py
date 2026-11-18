@@ -514,6 +514,21 @@ async def test_title_says_how_the_call_is_going():
 
 
 @pytest.mark.asyncio
+async def test_the_call_clock_runs_on_the_bots_clock():
+    # The bot's clock is 100 s behind this one, and its pipeline started 5 s ago.
+    app = TailApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await app.handle_status("connected")
+        behind = time.time() - 100
+        for kind, at in (("tail-pipeline-started", behind - 5), ("tail-ready", behind)):
+            await app.handle_message(
+                {"label": "tail", "type": kind, "worker": "bot-1", "timestamp": at, "data": {}}
+            )
+        await pilot.pause(0.2)
+        assert "● call 0:05" in rendered(app.title_bar)
+
+
+@pytest.mark.asyncio
 async def test_key_bar_lists_the_views_and_folds_when_narrow():
     app = TailApp()
     async with app.run_test(size=(160, 40)) as pilot:
