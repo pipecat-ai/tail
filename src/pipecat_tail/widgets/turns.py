@@ -592,7 +592,6 @@ class TurnBlock(Static):
 
     def on_click(self, event: events.Click) -> None:
         """Select the turn, and inspect it on a double click."""
-        self.view.forget_position()
         self.view.select(self.turn)
         if event.chain >= 2:
             self.post_message(self.Picked(self.turn))
@@ -649,7 +648,6 @@ class ConversationView(VerticalScroll):
         self.now = now
         self.errors = errors or (lambda: [])
         self.search_text: Optional[str] = None
-        self._position: Optional[str] = None
         self._blocks: dict[int, TurnBlock] = {}
         self._end_pending = False
         self._room = Static("", classes="room")
@@ -663,14 +661,29 @@ class ConversationView(VerticalScroll):
         how many turns match, and a pause that it's paused.
         """
         parts = ["conversation"]
-        if self._position:
-            parts.append(self._position)
+        position = None if self.following else self._position_of(self.selected_turn)
+        if position:
+            parts.append(position)
         elif self.search_text:
             count = len(self.matches())
             parts.append(f"“{self.search_text}” {count} turn{'s' if count != 1 else ''}")
-        if not self.following and not self._position:
+        if not self.following and not position:
             parts.append("paused")
         self.border_title = " · ".join(parts)
+
+    def _position_of(self, turn: Optional[Turn]) -> Optional[str]:
+        """Which search match or issue a turn is, as ``issue 2 of 5 · ▲ slow``."""
+        found, what = self._found()
+        for index, (candidate, label) in enumerate(found):
+            if candidate is turn:
+                return f"{what} {index + 1} of {len(found)}" + (f" · {label}" if label else "")
+        return None
+
+    def _found(self) -> tuple[list[tuple[Turn, str]], str]:
+        """The turns to step through: the search's matches, or else the issues."""
+        if self.search_text:
+            return [(turn, "") for turn in self.matches()], f"“{self.search_text}”"
+        return self.issues(), "issue"
 
     def compose(self):
         """Start with the blank space the turns go above."""
@@ -710,7 +723,7 @@ class ConversationView(VerticalScroll):
                 block.redraw()
         for block in new_blocks:
             block.redraw()
-        if self.search_text and not self._position:
+        if self.search_text or not self.following:
             self.update_legend()
         self.keep_at_end()
 
@@ -762,8 +775,6 @@ class ConversationView(VerticalScroll):
     def set_following(self, following: bool) -> None:
         """Follow the latest turn, or stay where the view is."""
         self.following = following
-        if following:
-            self._position = None
         self.update_legend()
         self.keep_at_end()
 
@@ -777,12 +788,7 @@ class ConversationView(VerticalScroll):
         # While following, the latest line decides where the view is.
         if turn is not None and id(turn) in self._blocks and not self.following:
             self._blocks[id(turn)].scroll_visible(animate=False, top=top)
-
-    def forget_position(self) -> None:
-        """The selection moved by hand: the title no longer counts issues or matches."""
-        if self._position:
-            self._position = None
-            self.update_legend()
+        self.update_legend()
 
     #
     # Looking back: issues and search
@@ -826,7 +832,6 @@ class ConversationView(VerticalScroll):
     def set_search(self, query: Optional[str]) -> int:
         """Search what was said, or stop searching with ``None``, and return the matches."""
         self.search_text = (query or "").strip() or None
-        self._position = None
         for block in self._blocks.values():
             block.redraw()
         self.update_legend()
@@ -842,12 +847,7 @@ class ConversationView(VerticalScroll):
         """
         if self.session is None:
             return None
-        if self.search_text:
-            found = [(turn, "") for turn in self.matches()]
-            what = f"“{self.search_text}”"
-        else:
-            found = self.issues()
-            what = "issue"
+        found, _ = self._found()
         if not found:
             return None
         order = {id(t): i for i, t in enumerate(self._visible_turns(self.session))}
@@ -862,10 +862,8 @@ class ConversationView(VerticalScroll):
         else:
             later = [i for i, pos in enumerate(positions) if pos < at]
             index = later[-1] if later else len(found) - 1
-        turn, label = found[index]
+        turn = found[index][0]
         self.following = False
-        self._position = f"{what} {index + 1} of {len(found)}" + (f" · {label}" if label else "")
-        self.update_legend()
         self.select(turn, top=True)
         return turn
 
@@ -881,7 +879,6 @@ class ConversationView(VerticalScroll):
         else:
             index = len(turns) - 1
         index = max(0, min(len(turns) - 1, index))
-        self._position = None
         self.set_following(index == len(turns) - 1)
         self.select(turns[index])
         return turns[index]

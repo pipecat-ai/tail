@@ -646,6 +646,30 @@ async def test_conversation_follows_the_latest_turn():
 
 
 @pytest.mark.asyncio
+async def test_switching_worker_leaves_the_other_workers_place_behind():
+    app = TailApp()
+    async with app.run_test(size=(140, 42)) as pilot:
+        await feed(app, pilot)
+        conv = app.live.conversation
+        await pilot.press("n")
+        await pilot.pause(0.2)
+        assert "issue 1 of 5" in conv.border_title
+        # A second worker, with nothing wrong in it.
+        await app.handle_message(
+            {
+                "label": "rtvi-ai",
+                "type": "user-started-speaking",
+                "worker": "bot-2",
+                "timestamp": time.time(),
+            }
+        )
+        await pilot.press("w")
+        await pilot.pause(0.2)
+        assert app.state.selected_worker == "bot-2"
+        assert conv.border_title == "conversation · paused"
+
+
+@pytest.mark.asyncio
 async def test_live_looks_back_through_issues_and_a_search():
     app = TailApp()
     async with app.run_test(size=(140, 42)) as pilot:
