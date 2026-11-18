@@ -381,6 +381,25 @@ def test_flow_rates_per_second():
     assert stats.out_total == 0.0
 
 
+def test_flow_stops_when_the_call_ends():
+    # The last interval's rates would otherwise stay up after the bot left:
+    # nothing sends a newer count once the pipeline stops.
+    moving = {"interval_secs": 0.25, "processors": {"A": {"out": {"audio": 12}, "in": {"data": 1}}}}
+    for end in (tail("tail-pipeline-finished"), None):
+        state = SessionState()
+        state.set_status("connected")
+        state.apply(tail("tail-flow", moving))
+        stats = state.selected.flow["A"]
+        assert stats.out_total == 48.0
+        if end is not None:
+            state.apply(end)
+        else:
+            state.set_status("disconnected")
+        assert stats.out_total == 0.0 and stats.in_total == 0.0
+        # What moved before stays in the history.
+        assert list(stats.history) == [48.0]
+
+
 def test_worker_selection_cycles():
     state = SessionState()
     state.apply(rtvi("user-started-speaking", worker="a"))

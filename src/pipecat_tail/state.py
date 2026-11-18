@@ -766,6 +766,10 @@ class WorkerSession:
             self.wait_started_at = None
         self.user_level = 0.0
         self.bot_level = 0.0
+        # Rates are the last interval's counts, and no more counts are coming.
+        for stats in self.flow.values():
+            stats.out_rates = {}
+            stats.in_rates = {}
 
     # The wait for the bot
 
@@ -934,7 +938,7 @@ class SessionState:
         if status != "connected":
             for session in self.sessions.values():
                 session.reset_activity()
-        return {STATUS, STRIP, VOICE}
+        return {STATUS, STRIP, VOICE, FLOW}
 
     def call_end(self, session: WorkerSession) -> Optional[float]:
         """When the session's call ended, on the bot's clock, or None while it's on.
