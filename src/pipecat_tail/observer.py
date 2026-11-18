@@ -60,7 +60,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import ProcessingMetricsData
 from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
 from pipecat.pipeline.pipeline import PipelineSink, PipelineSource
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.models import (
     AudioLevelMessageData,
     BotAudioLevelMessage,
@@ -144,6 +144,21 @@ def _frame_kind(frame) -> str:
     if isinstance(frame, ControlFrame):
         return "control"
     return "data"
+
+
+def _worker_of(processor) -> Any:
+    """The worker (or task) whose pipeline starts at this processor, if any.
+
+    A worker feeds its pipeline through a ``PipelineSource`` that hands
+    upstream frames back to the worker. A pipeline's own sources hand them to
+    the pipeline, which is a processor.
+    """
+    if not isinstance(processor, PipelineSource):
+        return None
+    owner = getattr(getattr(processor, "_upstream_push_frame", None), "__self__", None)
+    if owner is None or isinstance(owner, FrameProcessor):
+        return None
+    return owner
 
 
 def _is_plumbing(processor) -> bool:
@@ -230,8 +245,8 @@ class TailObserver(BaseObserver):
         port: Port for the built-in websocket server.
         worker: The pipeline worker (or task, before Pipecat 1.3) this
             observer is attached to. Used to tag messages with the worker name
-            and to list the pipeline's processors. Optional; without it
-            processors are discovered as the ``StartFrame`` reaches them.
+            and to list the pipeline's processors. Optional: without it the
+            observer finds the worker as its pipeline is set up.
         params: RTVI settings for the messages Tail receives. Defaults to
             ``default_rtvi_params()``. Audio levels are always Tail's own;
             ``audio_level_period_secs`` sets how often they are sent.
@@ -340,6 +355,15 @@ class TailObserver(BaseObserver):
         self._children.append(child)
         return child
 
+    def _find_worker(self, processor) -> None:
+        """Learn the worker from its own pipeline source, when not given one."""
+        if self._worker is not None:
+            return
+        worker = _worker_of(processor)
+        if worker is not None:
+            self._worker = worker
+            self._worker_name = getattr(worker, "name", None)
+
     @property
     def worker_name(self) -> Optional[str]:
         """Name of the worker this observer reports for, if known."""
@@ -412,7 +436,14 @@ class TailObserver(BaseObserver):
             await self._start()
         if isinstance(data.frame, StartFrame) and self._worker is None:
             processor = data.processor
-            if not _is_plumbing(processor) and processor.name not in self._processors:
+            # Before Pipecat 1.8 there is no setup hook: the worker's own
+            # source is the first to start.
+            self._find_worker(processor)
+            if (
+                self._worker is None
+                and not _is_plumbing(processor)
+                and processor.name not in self._processors
+            ):
                 self._processors.append(processor.name)
         await self._rtvi.on_process_frame(data)
         for child in self._children:
@@ -469,7 +500,10 @@ class TailObserver(BaseObserver):
                 await self._handle_vad(frame)
 
     async def on_processor_setup(self, data):
-        """Forward the hook to child observers (Pipecat 1.8+)."""
+        """Find the worker and forward the hook to child observers (Pipecat 1.8+)."""
+        # A client can connect before the pipeline starts, and its timing
+        # report must already carry the worker's name.
+        self._find_worker(data.processor)
         parent = getattr(super(), "on_processor_setup", None)
         if parent is not None:
             await parent(data)

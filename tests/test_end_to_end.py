@@ -37,6 +37,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage, LLMUsageMetricsData, TTFBMetricsData
+from pipecat.observers.base_observer import BaseObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameProcessor
@@ -248,15 +249,42 @@ async def test_observer_without_worker_discovers_processors():
     async def on_message(message):
         received.append(message)
 
-    await run_pipeline("bot-2", lambda _: TailObserver(sink=CallbackSink(on_message)))
+    worker, _ = await run_pipeline("bot-2", lambda _: TailObserver(sink=CallbackSink(on_message)))
 
     types = [m["type"] for m in received]
     assert "tail-pipeline-started" in types
     assert "tail-pipeline-finished" in types
     started = next(m for m in received if m["type"] == "tail-pipeline-started")
     assert "proc" in started["data"]["processors"]
-    # Messages are untagged when the observer does not know its worker.
-    assert all("worker" not in m for m in received)
+    # The observer finds its worker as the pipeline starts, so everything
+    # about the pipeline carries the worker's name, as it does when given one.
+    name = "bot-2" if compat.HAS_WORKERS else worker.name
+    assert started["worker"] == name
+    first = types.index("tail-pipeline-started")
+    assert all(m.get("worker") == name for m in received[first:] if m["type"] != "tail-log")
+
+
+@pytest.mark.skipif(
+    not hasattr(BaseObserver, "on_processor_setup"), reason="setup hook from Pipecat 1.8"
+)
+@pytest.mark.asyncio
+async def test_observer_finds_its_worker_as_the_pipeline_is_set_up():
+    # A client can connect while the pipeline is set up, before the StartFrame
+    # goes out, and its timing report must carry the worker's name.
+    from pipecat.observers.base_observer import ProcessorSetUp
+
+    async def ignore(_message):
+        pass
+
+    worker = PipelineWorker(Pipeline([FakeLLM(name="proc")]), name="bot-5")
+    observer = TailObserver(sink=CallbackSink(ignore))
+    pipeline = worker._pipeline
+    # A pipeline's own source isn't the worker's.
+    inner = Pipeline([FakeLLM(name="inner")])
+    await observer.on_processor_setup(ProcessorSetUp(inner._source, 0, 0))
+    assert observer.worker_name is None
+    await observer.on_processor_setup(ProcessorSetUp(pipeline._source, 0, 0))
+    assert observer.worker_name == "bot-5"
 
 
 async def collect(url: str, until: str, timeout: float = 15.0) -> list[dict]:
