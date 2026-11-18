@@ -10,7 +10,7 @@ When you talk to your voice bot, you only hear half of what happened. Did it dec
 
 **Tail** shows you while you talk. It's a terminal dashboard for bots built with [Pipecat](https://github.com/pipecat-ai/pipecat), the open source framework for voice and multimodal conversational AI. It sits next to your bot, in a side pane as narrow as 48 columns or across the whole screen, and attaching it takes no code at all.
 
-<p align="center"><img src="https://raw.githubusercontent.com/pipecat-ai/tail/refs/heads/main/tail-demo.gif" alt="Tail playing its demo session: the voice-to-voice clock counting while the bot calls a flight search tool, then the bot speaking; a typed turn, a transport error and a turn Pipecat ended before the user had finished; then n stepping back through the turns where something went wrong and f following the call again" width="900"/></p>
+<p align="center"><img src="https://raw.githubusercontent.com/pipecat-ai/tail/refs/heads/main/tail-image.gif" alt="Tail playing its demo session: the voice-to-voice clock counting while the bot calls a flight search tool, then the bot speaking; a typed turn, a transport error and a turn Pipecat ended before the user had finished; then n stepping back through the turns where something went wrong and f following the call again" width="900"/></p>
 
 ## Try it
 
