@@ -82,7 +82,8 @@ async def setup_worker_runner(runner):
 
     host, port = _address()
     server = TailServer(host=host, port=port)
-    _servers[runner] = server
+    # Workers know their runner's bus from Pipecat 1.3, their runner only from 1.8.
+    _servers[runner.bus] = server
     await runner.add_workers(server)
 
 
@@ -95,8 +96,9 @@ async def setup_pipeline_worker(worker):
     _enable_metrics(worker)
     server = None
     try:
-        server = _servers.get(worker.worker_runner)
-    except (RuntimeError, AttributeError, TypeError):
+        server = _servers.get(worker.bus)
+    except RuntimeError:
+        # Not added to a runner.
         pass
     if server is None:
         # No runner hook ran (for example the worker runs on a plain runner
