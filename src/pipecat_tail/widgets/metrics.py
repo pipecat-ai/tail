@@ -24,11 +24,6 @@ from pipecat_tail.state import WorkerSession, percentile
 from pipecat_tail.widgets import palette
 from pipecat_tail.widgets.graphics import cells, pack, sparkline
 from pipecat_tail.widgets.render import (
-    FROST_BLUE,
-    STYLE_BRIGHT,
-    STYLE_DIM,
-    STYLE_LABEL,
-    STYLE_TEXT,
     bar,
     fmt_int,
     fmt_secs,
@@ -298,7 +293,8 @@ class StartupPanel(Static):
         report: Optional[dict[str, Any]] = session.startup if session else None
         if not report:
             text.append(
-                "No startup report yet. It arrives once the pipeline has started.", style=STYLE_DIM
+                "No startup report yet. It arrives once the pipeline has started.",
+                style=palette.style("dim"),
             )
             return text
         timings = [t for t in report.get("processor_timings", []) if isinstance(t, dict)]
@@ -313,9 +309,9 @@ class StartupPanel(Static):
         bar_width = avail - name_width - 22
         longest = max([float(t.get("duration_secs", 0.0) or 0.0) for t in timings] + [0.001])
         if not two_lines:
-            text.append(f"{'processor':<{name_width}}  {'setup':>8}", style=STYLE_LABEL)
+            text.append(f"{'processor':<{name_width}}  {'setup':>8}", style=palette.style("dim"))
             if with_start:
-                text.append(f"  {'start':>8}", style=STYLE_LABEL)
+                text.append(f"  {'start':>8}", style=palette.style("dim"))
             text.append("\n")
         for timing in timings:
             name = str(timing.get("processor_name", "?"))
@@ -324,25 +320,27 @@ class StartupPanel(Static):
             duration = float(timing.get("duration_secs", setup + start) or 0.0)
             if two_lines:
                 # Too narrow for columns: the name, then its times under it.
-                text.append(f"{name}\n", style=STYLE_TEXT)
-                text.append("  setup ", style=STYLE_LABEL)
-                text.append(fmt_secs(setup), style=STYLE_BRIGHT)
-                text.append("  start ", style=STYLE_LABEL)
-                text.append(f"{fmt_secs(start)}\n", style=STYLE_DIM)
+                text.append(f"{name}\n", style=palette.style("text"))
+                text.append("  setup ", style=palette.style("dim"))
+                text.append(fmt_secs(setup), style=palette.style("bright", bold=True))
+                text.append("  start ", style=palette.style("dim"))
+                text.append(f"{fmt_secs(start)}\n", style=palette.style("dim"))
                 continue
-            text.append(f"{name[:name_width]:<{name_width}}  ", style=STYLE_TEXT)
-            text.append(f"{fmt_secs(setup):>8}", style=STYLE_BRIGHT)
+            text.append(f"{name[:name_width]:<{name_width}}  ", style=palette.style("text"))
+            text.append(f"{fmt_secs(setup):>8}", style=palette.style("bright", bold=True))
             if with_start:
-                text.append(f"  {fmt_secs(start):>8}", style=STYLE_DIM)
+                text.append(f"  {fmt_secs(start):>8}", style=palette.style("dim"))
             if with_bar:
                 text.append("  ")
-                text.append_text(bar(duration / longest, bar_width, FROST_BLUE, empty=" "))
+                text.append_text(
+                    bar(duration / longest, bar_width, palette.current().user, empty=" ")
+                )
             text.append("\n")
         text.append("\n")
         items: list[Text] = []
 
-        def item(label: str, value: str, style=STYLE_BRIGHT) -> None:
-            items.append(Text(f"{label} ", style=STYLE_LABEL) + Text(value, style=style))
+        def item(label: str, value: str, style=palette.style("bright", bold=True)) -> None:
+            items.append(Text(f"{label} ", style=palette.style("dim")) + Text(value, style=style))
 
         item("setup phase", fmt_secs_fixed(report.get("setup_phase_secs")))
         item("start phase", fmt_secs_fixed(report.get("start_phase_secs")))
@@ -353,7 +351,7 @@ class StartupPanel(Static):
                 "warm-up",
                 f"{fmt_secs_fixed(warmup.get('duration_secs'))} "
                 f"({fmt_secs(warmup.get('blocking_duration_secs'))} blocking)",
-                STYLE_TEXT,
+                palette.style("text"),
             )
         transport = session.transport_timing if session else None
         if isinstance(transport, dict):

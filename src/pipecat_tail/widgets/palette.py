@@ -18,6 +18,7 @@ light.
 
 from dataclasses import dataclass
 
+from rich.style import Style
 from textual.theme import Theme
 
 
@@ -110,6 +111,11 @@ LIGHT = Palette(
 )
 
 _current = DARK
+
+
+def style(role: str, **attrs) -> Style:
+    """A Rich style in the current palette's color for ``role`` (``text``, ``err``…)."""
+    return Style(color=getattr(_current, role), **attrs)
 
 
 def current() -> Palette:

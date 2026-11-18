@@ -17,13 +17,8 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Input, RichLog, Static
 
 from pipecat_tail.state import LogRecord, SessionState
+from pipecat_tail.widgets import palette
 from pipecat_tail.widgets.render import (
-    LEVEL_STYLES,
-    STYLE_DIM,
-    STYLE_ERROR,
-    STYLE_LABEL,
-    STYLE_TEXT,
-    YELLOW,
     fmt_clock,
     truncate,
 )
@@ -42,7 +37,21 @@ MAX_LINES = 2000
 COMPACT_WIDTH = 100
 """Below this width a line is the seconds, a one-letter level, the logger's last
 name and the message, wrapped, so the message is never pushed off the side."""
-MATCH_STYLE = Style(color=YELLOW, bold=True, underline=True)
+_LEVEL_ROLES = {
+    "TRACE": "border",
+    "DEBUG": "dim",
+    "INFO": "ok",
+    "SUCCESS": "ok",
+    "WARNING": "warn",
+    "ERROR": "err",
+    "CRITICAL": "err",
+}
+
+
+def level_style(level: str) -> Style:
+    """The style a log level is shown in, in the current palette."""
+    role = _LEVEL_ROLES.get(level, "text")
+    return palette.style(role, bold=role == "err")
 
 
 class ShownLog(RichLog):
@@ -204,15 +213,17 @@ class LogsView(Vertical):
 
     def _message(self, record: LogRecord) -> Text:
         level = record.level.upper()
-        message = Text(record.message, style=STYLE_TEXT)
+        message = Text(record.message, style=palette.style("text"))
         if level in ("ERROR", "CRITICAL"):
-            message.stylize(STYLE_ERROR)
+            message.stylize(palette.style("err", bold=True))
         elif level == "WARNING":
-            message.stylize(LEVEL_STYLES["WARNING"])
+            message.stylize(level_style("WARNING"))
         if self.pattern:
-            message.highlight_regex(self.pattern, MATCH_STYLE)
+            message.highlight_regex(self.pattern, palette.style("warn", bold=True, underline=True))
         if record.exception:
-            message.append(f"  {truncate(record.exception, 120)}", style=STYLE_ERROR)
+            message.append(
+                f"  {truncate(record.exception, 120)}", style=palette.style("err", bold=True)
+            )
         return message
 
     def _compact_line(self, record: LogRecord) -> Table:
@@ -223,22 +234,22 @@ class LogsView(Vertical):
         line.add_column(no_wrap=True, width=11)
         line.add_column(ratio=1, overflow="fold")
         line.add_row(
-            Text(record.clock[-6:], style=STYLE_DIM),
-            Text(level[:1], style=LEVEL_STYLES.get(level, STYLE_TEXT)),
-            Text(truncate(record.name.rsplit(".", 1)[-1], 11), style=STYLE_DIM),
+            Text(record.clock[-6:], style=palette.style("dim")),
+            Text(level[:1], style=level_style(level)),
+            Text(truncate(record.name.rsplit(".", 1)[-1], 11), style=palette.style("dim")),
             self._message(record),
         )
         return line
 
     def _line(self, record: LogRecord) -> Text:
         text = Text()
-        text.append(record.clock, style=STYLE_DIM)
+        text.append(record.clock, style=palette.style("dim"))
         level = record.level.upper()
-        text.append(f"  {level[:8]:<8} ", style=LEVEL_STYLES.get(level, STYLE_TEXT))
+        text.append(f"  {level[:8]:<8} ", style=level_style(level))
         module = truncate(record.name, 34)
         if record.worker:
             module = truncate(f"{record.worker} {record.name}", 34)
-        text.append(f"{module:<34} ", style=STYLE_DIM)
+        text.append(f"{module:<34} ", style=palette.style("dim"))
         text.append_text(self._message(record))
         return text
 
@@ -255,19 +266,20 @@ class LogsView(Vertical):
         state = self._state
         text = Text()
         if state is None or not state.errors:
-            text.append("no errors", style=STYLE_DIM)
-            text.append(f"   {self._shown} lines shown", style=STYLE_DIM)
+            text.append("no errors", style=palette.style("dim"))
+            text.append(f"   {self._shown} lines shown", style=palette.style("dim"))
             self.pinned.update(text)
             return
         error = state.errors[-1]
-        text.append("pinned  ", style=STYLE_LABEL)
+        text.append("pinned  ", style=palette.style("dim"))
         text.append(
-            f"{len(state.errors)} error{'s' if len(state.errors) != 1 else ''}", style=STYLE_ERROR
+            f"{len(state.errors)} error{'s' if len(state.errors) != 1 else ''}",
+            style=palette.style("err", bold=True),
         )
         text.append(
             f"  {fmt_clock(error.timestamp)} {error.processor} · {error.category} · "
             f"{'still usable' if error.processor_usable else 'unusable'}",
-            style=STYLE_DIM,
+            style=palette.style("dim"),
         )
-        text.append(f"   {self._shown} lines shown", style=STYLE_DIM)
+        text.append(f"   {self._shown} lines shown", style=palette.style("dim"))
         self.pinned.update(text)

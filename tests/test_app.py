@@ -285,6 +285,42 @@ async def test_logs_keep_coming_once_the_record_list_is_full():
 
 
 @pytest.mark.asyncio
+async def test_logs_workers_and_startup_follow_the_theme():
+    from pipecat_tail.widgets import palette
+    from pipecat_tail.widgets.render import status_dot
+    from pipecat_tail.widgets.workers import _render_bus_record
+
+    def colors(text) -> set[str]:
+        return {
+            str(span.style.color.get_truecolor().hex)
+            for span in text.spans
+            if not isinstance(span.style, str) and span.style.color
+        }
+
+    app = TailApp()
+    async with app.run_test(size=(150, 46)) as pilot:
+        await feed(app, pilot)
+        await pilot.press("t", "5")
+        await pilot.pause(0.3)
+        light = palette.current()
+        assert not light.dark
+        # Dark text on the light background, never the dark theme's light text.
+        dark_only = {palette.DARK.text, palette.DARK.bright, palette.DARK.dim}
+        log_colors = {
+            str(segment.style.color.get_truecolor().hex)
+            for line in app.logs_view.lines.lines
+            for segment in line
+            if segment.style and segment.style.color
+        }
+        assert light.text in log_colors and not log_colors & dark_only
+        startup = colors(app.pipeline_view.startup._build())
+        assert light.text in startup and not startup & dark_only
+        assert status_dot("running").style.color.get_truecolor().hex == light.ok
+        if app.state.bus:
+            assert not colors(_render_bus_record(app.state.bus[-1])) & dark_only
+
+
+@pytest.mark.asyncio
 async def test_layout_fits_small_terminals():
     app = TailApp()
     async with app.run_test(size=(80, 24)) as pilot:

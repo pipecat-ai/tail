@@ -324,6 +324,9 @@ class TailApp(App):
         self.refresh(layout=True)
         self._dirty |= {CONVERSATION, LATENCY, METRICS, STRIP, FLOW, VOICE, STARTUP, LOGS}
         self.live.conversation.sync(self.state.selected, full=True)
+        # The log and bus feeds are written once, in the colors of the time.
+        self.logs_view.rebuild()
+        self.pipeline_view.bus.rebuild(self.state)
 
     def _bind_session(self) -> None:
         session = self.state.selected

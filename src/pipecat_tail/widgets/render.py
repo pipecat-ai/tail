@@ -4,17 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Rendering helpers shared by the Tail widgets.
-
-The constants are the dark Tail palette (see ``palette``), for widgets that
-style text once rather than on every render.
-"""
+"""Rendering helpers shared by the Tail widgets."""
 
 import datetime
 from typing import Iterable, Optional, Sequence
 
 from rich.style import Style
 from rich.text import Text
+
+from pipecat_tail.widgets import palette
 
 # Tail, dark
 POLAR_1 = "#19212c"
@@ -30,30 +28,6 @@ ORANGE = "#ff9d5c"
 YELLOW = "#ffc857"
 GREEN = "#4be08a"
 PURPLE = "#b18cff"
-
-STYLE_DIM = Style(color=DIM)
-STYLE_LABEL = Style(color=DIM)
-STYLE_TEXT = Style(color=SNOW)
-STYLE_BRIGHT = Style(color=BRIGHT, bold=True)
-STYLE_USER = Style(color=FROST_CYAN, bold=True)
-STYLE_BOT = Style(color=PURPLE, bold=True)
-STYLE_TOOL = Style(color=YELLOW)
-STYLE_INTERIM = Style(color=DIM, italic=True)
-STYLE_STRUCK = Style(color=DIM, strike=True)
-STYLE_ERROR = Style(color=RED, bold=True)
-STYLE_WARN = Style(color=YELLOW)
-STYLE_OK = Style(color=GREEN)
-STYLE_INFO = Style(color=FROST_BLUE)
-
-LEVEL_STYLES = {
-    "TRACE": Style(color=POLAR_3),
-    "DEBUG": STYLE_DIM,
-    "INFO": STYLE_OK,
-    "SUCCESS": STYLE_OK,
-    "WARNING": STYLE_WARN,
-    "ERROR": STYLE_ERROR,
-    "CRITICAL": STYLE_ERROR,
-}
 
 # Colors for the pieces of a latency breakdown, keyed by contribution key.
 CONTRIBUTION_COLORS = {
@@ -241,9 +215,9 @@ def stacked_bar(parts: Iterable[tuple[float, str]], width: int, total: float) ->
 def status_dot(status: str) -> Text:
     """A colored dot for a connection or worker status."""
     if status in ("connected", "running", "ready"):
-        return Text("●", style=STYLE_OK)
+        return Text("●", style=palette.style("ok"))
     if status in ("connecting", "idle", "starting", "known"):
-        return Text("●", style=STYLE_WARN)
+        return Text("●", style=palette.style("warn"))
     if status in ("error", "failed"):
-        return Text("●", style=STYLE_ERROR)
-    return Text("○", style=STYLE_DIM)
+        return Text("●", style=palette.style("err", bold=True))
+    return Text("○", style=palette.style("dim"))

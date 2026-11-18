@@ -15,21 +15,9 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, RichLog, Tree
 
 from pipecat_tail.state import BusRecord, SessionState
+from pipecat_tail.widgets import palette
 from pipecat_tail.widgets.logs import ShownLog
 from pipecat_tail.widgets.render import (
-    FROST_BLUE,
-    FROST_CYAN,
-    GREEN,
-    PURPLE,
-    RED,
-    STYLE_BRIGHT,
-    STYLE_DIM,
-    STYLE_ERROR,
-    STYLE_LABEL,
-    STYLE_OK,
-    STYLE_TEXT,
-    STYLE_WARN,
-    YELLOW,
     fmt_clock,
     fmt_elapsed,
     status_dot,
@@ -39,11 +27,11 @@ from pipecat_tail.widgets.render import (
 BUS_FILTERS = ("no frames", "all", "jobs", "lifecycle")
 MAX_BUS_LINES = 1000
 
-_CATEGORY_COLORS = {
-    "lifecycle": FROST_CYAN,
-    "job": FROST_BLUE,
-    "frame": PURPLE,
-    "other": YELLOW,
+_CATEGORY_ROLES = {
+    "lifecycle": "user",
+    "job": "accent",
+    "frame": "llm",
+    "other": "warn",
 }
 
 
@@ -76,8 +64,8 @@ class WorkerTree(Tree):
         self.show_root = not state.info.get("standalone")
         root_label = Text()
         root_label.append_text(status_dot(state.status))
-        root_label.append(f" {state.runner or 'runner'}", style=STYLE_BRIGHT)
-        root_label.append("  WorkerRunner", style=STYLE_DIM)
+        root_label.append(f" {state.runner or 'runner'}", style=palette.style("bright", bold=True))
+        root_label.append("  WorkerRunner", style=palette.style("dim"))
         self.root.set_label(root_label)
 
         names = set(state.workers) | set(state.pipeline_workers)
@@ -99,23 +87,23 @@ class WorkerTree(Tree):
                 status = "finished"
             label = Text()
             label.append_text(status_dot(status))
-            label.append(f" {name}", style=STYLE_BRIGHT)
+            label.append(f" {name}", style=palette.style("bright", bold=True))
             kind = "PipelineWorker" if session or (info and info.processors) else "Worker"
-            label.append(f"  {kind}", style=STYLE_DIM)
+            label.append(f"  {kind}", style=palette.style("dim"))
             label.append(f"  {status}", style=_status_style(status))
             if name == state.selected_worker:
-                label.append("  ◂ selected", style=STYLE_WARN)
+                label.append("  ◂ selected", style=palette.style("warn"))
             if info and info.error:
-                label.append(f"  {truncate(info.error, 40)}", style=STYLE_ERROR)
+                label.append(f"  {truncate(info.error, 40)}", style=palette.style("err", bold=True))
             child = node.add(label, expand=True)
             processors = info.processors if info else []
             if processors:
                 header = Text()
-                header.append("pipeline", style=STYLE_TEXT)
-                header.append(f"  {len(processors)} processors", style=STYLE_DIM)
+                header.append("pipeline", style=palette.style("text"))
+                header.append(f"  {len(processors)} processors", style=palette.style("dim"))
                 pipeline = child.add(header, data=name, expand=name in self._expanded)
                 for processor in processors:
-                    pipeline.add_leaf(Text(processor, style=STYLE_DIM))
+                    pipeline.add_leaf(Text(processor, style=palette.style("dim")))
             for grandchild in by_parent.get(name, []):
                 add(child, grandchild)
 
@@ -126,12 +114,12 @@ class WorkerTree(Tree):
 
 def _status_style(status: str):
     if status in ("running", "ready"):
-        return STYLE_OK
+        return palette.style("ok")
     if status in ("error", "failed"):
-        return STYLE_ERROR
+        return palette.style("err", bold=True)
     if status in ("starting", "known"):
-        return STYLE_WARN
-    return STYLE_DIM
+        return palette.style("warn")
+    return palette.style("dim")
 
 
 class JobsTable(DataTable):
@@ -153,7 +141,7 @@ class JobsTable(DataTable):
         for job in jobs[:200]:
             status = Text(job.status, style=_job_style(job.status))
             self.add_row(
-                Text(job.job_id[:8], style=STYLE_TEXT),
+                Text(job.job_id[:8], style=palette.style("text")),
                 job.job_name or "",
                 job.source or "",
                 job.target or "",
@@ -167,12 +155,12 @@ class JobsTable(DataTable):
 
 def _job_style(status: str):
     if status == "running":
-        return STYLE_OK
+        return palette.style("ok")
     if status in ("error", "failed"):
-        return STYLE_ERROR
+        return palette.style("err", bold=True)
     if status == "cancelled":
-        return STYLE_WARN
-    return STYLE_DIM
+        return palette.style("warn")
+    return palette.style("dim")
 
 
 class BusFeed(ShownLog):
@@ -239,17 +227,19 @@ class BusFeed(ShownLog):
 
 def _render_bus_record(record: BusRecord) -> Text:
     text = Text()
-    text.append(fmt_clock(record.timestamp), style=STYLE_DIM)
-    text.append(f"  {record.source or '?':<12}", style=STYLE_TEXT)
+    text.append(fmt_clock(record.timestamp), style=palette.style("dim"))
+    text.append(f"  {record.source or '?':<12}", style=palette.style("text"))
     target = record.target or "broadcast"
-    text.append(f"{target:<12}", style=STYLE_TEXT if record.target else STYLE_DIM)
-    color = _CATEGORY_COLORS.get(record.category, YELLOW)
+    text.append(
+        f"{target:<12}", style=palette.style("text") if record.target else palette.style("dim")
+    )
+    role = _CATEGORY_ROLES.get(record.category, "warn")
     if record.message_type.endswith("ErrorMessage"):
-        color = RED
+        role = "err"
     elif record.message_type.endswith("ReadyMessage"):
-        color = GREEN
-    text.append(f"{record.name:<32}", style=f"{color}")
-    text.append(_summarize_payload(record), style=STYLE_DIM)
+        role = "ok"
+    text.append(f"{record.name:<32}", style=palette.style(role))
+    text.append(_summarize_payload(record), style=palette.style("dim"))
     return text
 
 
