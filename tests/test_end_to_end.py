@@ -532,6 +532,35 @@ async def test_observer_in_observers_keeps_the_bots_own_rtvi():
     assert getattr(worker, "_rtvi", None) is not None
 
 
+@needs_workers
+@pytest.mark.asyncio
+async def test_a_server_sends_each_log_line_once():
+    # Logs belong to the process: with several observers reporting through
+    # one server, each line still reaches the app once.
+    from collections import Counter
+
+    from pipecat_tail.server import TailServer
+
+    logger.remove()
+    received: list[dict] = []
+
+    async def on_message(message):
+        received.append(message)
+
+    tail = TailServer(sink=CallbackSink(on_message))
+
+    def factory(worker):
+        worker.add_observer(tail.create_observer(worker))
+        return tail.create_observer(worker)
+
+    await run_pipeline("bot-7", factory, extra_workers=(tail,))
+    logs = [m for m in received if m["type"] == "tail-log"]
+    assert logs
+    lines = Counter((m["data"]["time"], m["data"]["message"]) for m in logs)
+    assert max(lines.values()) == 1
+    assert all("worker" not in m for m in logs)
+
+
 def test_setup_file_defines_every_hook():
     from pipecat_tail import setup
 

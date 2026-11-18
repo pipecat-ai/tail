@@ -75,13 +75,14 @@ from pipecat_tail import compat
 from pipecat_tail.messages import (
     TailBusMessage,
     TailJobMessage,
+    TailMessage,
     TailReadyMessage,
     TailWorkerErrorMessage,
     TailWorkerReadyMessage,
     TailWorkersMessage,
     tail_serializer,
 )
-from pipecat_tail.observer import TailObserver
+from pipecat_tail.observer import TailObserver, forward_logs, stop_forwarding_logs
 from pipecat_tail.sink import DEFAULT_HOST, DEFAULT_PORT, TailSink, TailWebSocketServer
 
 DEFAULT_EXCLUDE_BUS_FRAMES: tuple[type[Frame], ...] = (
@@ -158,6 +159,7 @@ class TailServer(BaseWorker):
         exclude_bus_frames: Frame types whose bus messages are not forwarded.
         auto_stop: Stop this worker, and so let the runner end, once every
             pipeline worker it observes has finished.
+        log_level: Minimum loguru level forwarded as log messages.
     """
 
     def __init__(
@@ -169,6 +171,7 @@ class TailServer(BaseWorker):
         sink: Optional[TailSink] = None,
         exclude_bus_frames: tuple[type[Frame], ...] = DEFAULT_EXCLUDE_BUS_FRAMES,
         auto_stop: bool = True,
+        log_level: str = "DEBUG",
     ):
         """Initialize the server. See the class docstring for the arguments."""
         super().__init__(name)
@@ -186,6 +189,8 @@ class TailServer(BaseWorker):
         self._registry_snapshot: Optional[dict[str, Any]] = None
         self._runner_name: Optional[str] = None
         self._watch_task: Optional[asyncio.Task] = None
+        self._log_level = log_level
+        self._logger_id: Optional[int] = None
 
     @property
     def url(self) -> Optional[str]:
@@ -205,6 +210,8 @@ class TailServer(BaseWorker):
         self._observed[worker.name] = worker
         self._pipeline_done[worker.name] = asyncio.Event()
         self._maybe_watch()
+        # The server forwards the process's logs, once for all its pipelines.
+        kwargs.setdefault("log_level", None)
         return TailObserver(sink=self, worker=worker, **kwargs)
 
     async def emit(self, message: dict[str, Any]) -> None:
@@ -223,6 +230,7 @@ class TailServer(BaseWorker):
     async def start(self) -> None:
         """Start the worker and its websocket server."""
         await super().start()
+        self._logger_id = forward_logs(self._send, self._log_level)
         if self._server:
             try:
                 await self._server.start()
@@ -243,9 +251,14 @@ class TailServer(BaseWorker):
             except asyncio.CancelledError:
                 pass
             self._watch_task = None
+        stop_forwarding_logs(self._logger_id)
+        self._logger_id = None
         if self._server:
             await self._server.stop()
         await super().stop()
+
+    async def _send(self, model: TailMessage) -> None:
+        await self.emit(model.model_dump(mode="json", exclude_none=True))
 
     def _maybe_watch(self) -> None:
         if not self._auto_stop or self._watch_task or not self._observed:

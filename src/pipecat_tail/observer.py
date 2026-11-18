@@ -36,7 +36,7 @@ import datetime
 import math
 import time
 from collections import OrderedDict
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 import numpy as np
 from loguru import logger
@@ -161,6 +161,46 @@ def _worker_of(processor) -> Any:
     return owner
 
 
+def forward_logs(send: Callable[[TailMessage], Awaitable[None]], level: str) -> int:
+    """Send loguru's records as log messages, and return the handler's id.
+
+    Logs belong to the process, not to a pipeline: whoever owns the connection
+    to the app forwards them, once.
+    """
+
+    async def sink(message):
+        record = message.record
+        when: datetime.datetime = record["time"]
+        exception = record.get("exception")
+        data = {
+            "time": when.isoformat(),
+            "level": record["level"].name,
+            "name": record["name"],
+            "function": record["function"],
+            "line": record["line"],
+            "message": record["message"],
+        }
+        if exception and exception.type is not None:
+            data["exception"] = f"{exception.type.__name__}: {exception.value}"
+        await send(TailLogMessage(data=data))
+
+    def not_ours(record) -> bool:
+        # Tail's own logs would feed the sink with itself.
+        return not record["name"].startswith("pipecat_tail")
+
+    return logger.add(sink, level=level, filter=not_ours, enqueue=False)
+
+
+def stop_forwarding_logs(handler_id: Optional[int]) -> None:
+    """Remove a handler ``forward_logs`` added, if there is one."""
+    if handler_id is None:
+        return
+    try:
+        logger.remove(handler_id)
+    except ValueError:
+        pass
+
+
 def _is_plumbing(processor) -> bool:
     return isinstance(processor, (PipelineSource, PipelineSink)) or bool(
         getattr(processor, "processors", None)
@@ -250,7 +290,9 @@ class TailObserver(BaseObserver):
         params: RTVI settings for the messages Tail receives. Defaults to
             ``default_rtvi_params()``. Audio levels are always Tail's own;
             ``audio_level_period_secs`` sets how often they are sent.
-        log_level: Minimum loguru level forwarded as log messages.
+        log_level: Minimum loguru level forwarded as log messages, or None to
+            leave the logs to whoever owns the connection: a ``TailServer``
+            forwards them once for all its pipelines.
         flow_interval_secs: How often frame flow counts are reported.
         **kwargs: Passed to the private ``RTVIObserver``.
     """
@@ -263,7 +305,7 @@ class TailObserver(BaseObserver):
         port: int = DEFAULT_PORT,
         worker=None,
         params: Optional[RTVIObserverParams] = None,
-        log_level: str = "DEBUG",
+        log_level: Optional[str] = "DEBUG",
         flow_interval_secs: float = DEFAULT_FLOW_INTERVAL_SECS,
         **kwargs,
     ):
@@ -397,9 +439,8 @@ class TailObserver(BaseObserver):
         if self._started:
             return
         self._started = True
-        self._logger_id = logger.add(
-            self._log_sink, level=self._log_level, filter=self._log_filter, enqueue=False
-        )
+        if self._log_level is not None:
+            self._logger_id = forward_logs(self.send_tail_message, self._log_level)
         if self._server:
             try:
                 await self._server.start()
@@ -408,12 +449,8 @@ class TailObserver(BaseObserver):
 
     async def cleanup(self):
         """Tear down child observers, the log sink and the built-in server."""
-        if self._logger_id is not None:
-            try:
-                logger.remove(self._logger_id)
-            except ValueError:
-                pass
-            self._logger_id = None
+        stop_forwarding_logs(self._logger_id)
+        self._logger_id = None
         # Child cleanup waits for their pending event handlers, so everything
         # they reported is delivered before the pipeline is declared finished.
         for child in self._children:
@@ -623,26 +660,6 @@ class TailObserver(BaseObserver):
     #
     # Logs
     #
-
-    def _log_filter(self, record) -> bool:
-        # Never forward our own logs: the sink would feed itself.
-        return not record["name"].startswith("pipecat_tail")
-
-    async def _log_sink(self, message):
-        record = message.record
-        when: datetime.datetime = record["time"]
-        exception = record.get("exception")
-        data = {
-            "time": when.isoformat(),
-            "level": record["level"].name,
-            "name": record["name"],
-            "function": record["function"],
-            "line": record["line"],
-            "message": record["message"],
-        }
-        if exception and exception.type is not None:
-            data["exception"] = f"{exception.type.__name__}: {exception.value}"
-        await self.send_tail_message(TailLogMessage(data=data))
 
     #
     # Child observer events
