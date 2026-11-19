@@ -37,7 +37,7 @@ from pipecat_tail.state import (
     percentile,
 )
 from pipecat_tail.widgets import palette
-from pipecat_tail.widgets.graphics import big_number, fit, pad, stacked
+from pipecat_tail.widgets.graphics import big_number, fit, pad, spread, stacked
 from pipecat_tail.widgets.latency import parts_of, turn_bar
 from pipecat_tail.widgets.render import fmt_elapsed, fmt_latency_digits, fmt_secs, truncate
 
@@ -133,11 +133,9 @@ class TitleBar(Widget):
                 Text(" · ", style=Style(color=p.muted)),
             )
         )
-        gap = width - left.cell_len - right.cell_len
-        if gap < 1:
+        if width - left.cell_len - right.cell_len < 1:
             left.truncate(max(0, width - right.cell_len - 1), overflow="ellipsis")
-            gap = width - left.cell_len - right.cell_len
-        return left + Text(" " * max(gap, 0)) + right
+        return spread(left, right, width, min_gap=0)
 
     def _status(self) -> Text:
         """The call's status in words. The dot only changes when the connection does."""
@@ -555,10 +553,7 @@ class ErrorBanner(Widget):
         hint.append("logs", style=Style(color=p.muted))
         hint.append("  x ", style=Style(color=p.bright, bold=True))
         hint.append("dismiss ", style=Style(color=p.muted))
-        gap = self.size.width - text.cell_len - hint.cell_len
-        text.append(" " * max(gap, 1))
-        text.append_text(hint)
-        return text
+        return spread(text, hint, self.size.width)
 
 
 SHORT_LABELS = {"end search": "end"}

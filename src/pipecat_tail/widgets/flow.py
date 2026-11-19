@@ -22,7 +22,7 @@ from textual.widget import Widget
 
 from pipecat_tail.state import FlowStats, SessionState, WorkerSession
 from pipecat_tail.widgets import palette
-from pipecat_tail.widgets.graphics import pad, sparkline
+from pipecat_tail.widgets.graphics import pad, sparkline, spread
 from pipecat_tail.widgets.render import fmt_secs
 
 KIND_NAMES = {
@@ -122,16 +122,14 @@ def processor_rows(
             gap = width - left.cell_len
         if gap < 1:
             left.truncate(max(1, width - 1), overflow="ellipsis")
-            gap = 1
-        lines.append(left + Text(" " * max(gap, 1)) + right)
+        lines.append(spread(left, right, width))
 
         if edges and index < len(names) - 1:
             flow = _rates(stats.out_rates)
             edge = Text("   ")
             edge.append("┃" if active else "│", style=Style(color=color if active else p.border))
             if below is not None:
-                edge.append(" " * max(1, width - edge.cell_len - below.cell_len))
-                edge.append_text(below)
+                edge = spread(edge, below, width)
             elif flow and flow != last_flow:
                 # The same rate on every edge says nothing; only a change does.
                 edge.append("  " + flow, style=Style(color=p.muted))

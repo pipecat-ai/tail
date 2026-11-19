@@ -110,6 +110,11 @@ def cells(row: Sequence[tuple[Text, int, str]], gap: int = 2) -> Text:
     return line
 
 
+def spread(left: Text, right: Text, width: int, min_gap: int = 1) -> Text:
+    """``left`` and ``right`` at the two ends of ``width`` cells, at least ``min_gap`` apart."""
+    return left + Text(" " * max(min_gap, width - left.cell_len - right.cell_len)) + right
+
+
 @dataclass(frozen=True)
 class Column:
     """A column of a ``Table``: how its cells line up, and what gives way when short of room.
