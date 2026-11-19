@@ -123,10 +123,6 @@ class TailAppProcess:
         process.start()
         return process
 
-    def run(self):
-        """Launch the app in a separate process and wait for it to exit."""
-        self.start().join()
-
     def _app_process(self):
         # Ctrl-C belongs to the pipeline process, which closes the app when
         # it shuts down. The app's terminal is in raw mode anyway, so this
@@ -224,7 +220,7 @@ class TailRunner(WorkerRunner):
             name=name, handle_sigint=handle_sigint, handle_sigterm=handle_sigterm, **kwargs
         )
         self._queue: Queue = Queue()
-        self._server = TailServer(sink=QueueSink(self._queue), auto_stop=True)
+        self._server = TailServer(sink=QueueSink(self._queue))
         self._server_added = False
 
     @property

@@ -26,7 +26,6 @@ Importing this module imports Pipecat.
 
 import dataclasses
 import importlib
-from importlib.metadata import version
 from typing import Any, Optional
 
 from pipecat.processors.frameworks.rtvi.observer import (
@@ -42,26 +41,10 @@ def _optional(module: str, name: str) -> Optional[Any]:
         return None
 
 
-def _pipecat_version() -> str:
-    try:
-        return version("pipecat-ai")
-    except Exception:
-        return "unknown"
-
-
-PIPECAT_VERSION = _pipecat_version()
-
 ErrorObserver = _optional("pipecat.observers.error_observer", "ErrorObserver")
 FunctionCallObserver = _optional("pipecat.observers.function_call_observer", "FunctionCallObserver")
 ServiceMetricsObserver = _optional(
     "pipecat.observers.service_metrics_observer", "ServiceMetricsObserver"
-)
-StartupTimingObserver = _optional(
-    "pipecat.observers.startup_timing_observer", "StartupTimingObserver"
-)
-TurnTrackingObserver = _optional("pipecat.observers.turn_tracking_observer", "TurnTrackingObserver")
-UserBotLatencyObserver = _optional(
-    "pipecat.observers.user_bot_latency_observer", "UserBotLatencyObserver"
 )
 
 HAS_WORKERS = _optional("pipecat.workers.runner", "WorkerRunner") is not None
@@ -103,16 +86,14 @@ def rtvi_params(**settings: Any) -> RTVIObserverParams:
 def default_rtvi_params() -> RTVIObserverParams:
     """RTVI observer settings Tail uses.
 
-    Audio levels are on, sampled often enough to draw the voice timeline.
-    Raw VAD, user input, raw text and LLM markers are on where Pipecat has
+    Audio levels are Tail's own, sampled often enough to draw the voice
+    timeline. Raw VAD, user input, raw text and LLM markers are on where Pipecat has
     them. Metrics and function call reports are on only when the dedicated
     observers that carry richer versions of them are missing. System logs
     are off because Tail has its own log sink.
     """
     full_function_calls = FunctionCallObserver is None
     return rtvi_params(
-        user_audio_level_enabled=True,
-        bot_audio_level_enabled=True,
         audio_level_period_secs=0.08,
         vad_user_speaking_enabled=True,
         user_input_enabled=True,
@@ -135,13 +116,18 @@ def capabilities() -> list[str]:
     The app uses them to tell an empty view apart from one that needs a
     newer Pipecat.
     """
-    caps = ["conversation", "audio-levels", "metrics", "function-calls", "errors", "flow", "logs"]
-    if UserBotLatencyObserver is not None:
-        caps.append("latency-breakdown")
-    if TurnTrackingObserver is not None:
-        caps.append("turns")
-    if StartupTimingObserver is not None:
-        caps.append("startup")
+    caps = [
+        "conversation",
+        "audio-levels",
+        "metrics",
+        "function-calls",
+        "errors",
+        "flow",
+        "logs",
+        "latency-breakdown",
+        "turns",
+        "startup",
+    ]
     if "vad_user_speaking_enabled" in RTVI_PARAMS:
         caps.append("vad")
     if HAS_USER_INPUT:

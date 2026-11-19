@@ -59,6 +59,9 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import ProcessingMetricsData
 from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
+from pipecat.observers.startup_timing_observer import StartupTimingObserver
+from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
+from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.pipeline.pipeline import PipelineSink, PipelineSource
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.models import (
@@ -267,12 +270,9 @@ class _RTVIBridge(RTVIObserver):
 
 def _without_audio_levels(params: RTVIObserverParams) -> RTVIObserverParams:
     # Tail measures audio levels itself (see ``audio_level``).
-    changes = {
-        name: False
-        for name in ("user_audio_level_enabled", "bot_audio_level_enabled")
-        if name in compat.RTVI_PARAMS
-    }
-    return dataclasses.replace(params, **changes)
+    return dataclasses.replace(
+        params, user_audio_level_enabled=False, bot_audio_level_enabled=False
+    )
 
 
 class TailObserver(BaseObserver):
@@ -312,9 +312,8 @@ class TailObserver(BaseObserver):
         """Initialize the observer. See the class docstring for the arguments."""
         super().__init__()
         params = params or default_rtvi_params()
-        self._params = params
         self._rtvi = _RTVIBridge(self, _without_audio_levels(params), **kwargs)
-        self._level_period = float(getattr(params, "audio_level_period_secs", 0.08) or 0.08)
+        self._level_period = params.audio_level_period_secs
         self._user_level = _Level()
         self._bot_level = _Level()
         # Bot audio is measured as the output transport plays it, when it
@@ -333,7 +332,6 @@ class TailObserver(BaseObserver):
             sink = self._server
         self._sink: TailSink = sink
 
-        self._processors: list[str] = []
         self._pipeline_finished = False
         self._seen = _SeenFrames()
         self._contexts = ContextTracker()
@@ -344,33 +342,33 @@ class TailObserver(BaseObserver):
         self._flow_started = time.monotonic()
         self._flow: dict[tuple[str, str], dict[str, int]] = {}
 
-        # Pipecat observers that add what RTVI does not carry. Each one is
-        # optional: older Pipecat releases fall back to RTVI or to handling
-        # the frames here.
+        # Pipecat observers that add what RTVI does not carry. The errors,
+        # function calls and service metrics ones are newer than 1.0: without
+        # them RTVI or the frames handled here carry the same.
         self._children: list[BaseObserver] = []
-        self._latency = self._add_child(
-            compat.UserBotLatencyObserver,
+        self._add_child(
+            UserBotLatencyObserver,
             on_latency_measured=self._on_latency_measured,
             on_first_bot_speech_latency=self._on_first_bot_speech,
             on_latency_breakdown=self._on_latency_breakdown,
         )
-        self._startup = self._add_child(
-            compat.StartupTimingObserver,
+        self._add_child(
+            StartupTimingObserver,
             on_startup_timing_report=self._on_startup_report,
             on_transport_timing_report=self._on_transport_report,
         )
-        self._turns = self._add_child(
-            compat.TurnTrackingObserver,
+        self._add_child(
+            TurnTrackingObserver,
             on_turn_started=self._on_turn_started,
             on_turn_ended=self._on_turn_ended,
         )
-        self._errors = self._add_child(compat.ErrorObserver, on_error=self._on_error)
-        self._function_calls = self._add_child(
+        self._add_child(compat.ErrorObserver, on_error=self._on_error)
+        self._add_child(
             compat.FunctionCallObserver,
             init={"include_arguments": True, "include_results": True},
             on_function_call_event=self._on_function_call,
         )
-        self._metrics = self._add_child(
+        self._add_child(
             compat.ServiceMetricsObserver,
             on_service_latency=self._on_service_latency,
             on_service_usage=self._on_service_usage,
@@ -381,21 +379,13 @@ class TailObserver(BaseObserver):
         self._pending_latency: Optional[float] = None
         self._pending_first_bot_speech = False
 
-    def _add_child(self, cls, *, init: Optional[dict[str, Any]] = None, **handlers):
+    def _add_child(self, cls, *, init: Optional[dict[str, Any]] = None, **handlers) -> None:
         if cls is None:
-            return None
-        try:
-            child = cls(**(init or {}))
-        except TypeError:
-            child = cls()
+            return
+        child = cls(**(init or {}))
         for event, handler in handlers.items():
-            try:
-                child.add_event_handler(event, handler)
-            except Exception:
-                # An event this Pipecat release does not have.
-                pass
+            child.add_event_handler(event, handler)
         self._children.append(child)
-        return child
 
     def _find_worker(self, processor) -> None:
         """Learn the worker from its own pipeline source, when not given one."""
@@ -410,11 +400,6 @@ class TailObserver(BaseObserver):
     def worker_name(self) -> Optional[str]:
         """Name of the worker this observer reports for, if known."""
         return self._worker_name
-
-    @property
-    def server(self) -> Optional[TailWebSocketServer]:
-        """The built-in websocket server, if this observer owns one."""
-        return self._server
 
     #
     # Lifecycle
@@ -468,20 +453,13 @@ class TailObserver(BaseObserver):
     #
 
     async def on_process_frame(self, data: FrameProcessed):
-        """Forward the hook and record processors as the StartFrame reaches them."""
+        """Forward the hook, finding the worker as the StartFrame leaves its source."""
         if not self._started:
             await self._start()
-        if isinstance(data.frame, StartFrame) and self._worker is None:
-            processor = data.processor
+        if isinstance(data.frame, StartFrame):
             # Before Pipecat 1.8 there is no setup hook: the worker's own
             # source is the first to start.
-            self._find_worker(processor)
-            if (
-                self._worker is None
-                and not _is_plumbing(processor)
-                and processor.name not in self._processors
-            ):
-                self._processors.append(processor.name)
+            self._find_worker(data.processor)
         await self._rtvi.on_process_frame(data)
         for child in self._children:
             await child.on_process_frame(data)
@@ -526,10 +504,10 @@ class TailObserver(BaseObserver):
                 # Send a final zero so the meter does not freeze.
                 await self._send_level(self._bot_level, 0.0, BotAudioLevelMessage)
         elif isinstance(frame, MetricsFrame):
-            if self._metrics is not None:
+            if compat.ServiceMetricsObserver is not None:
                 await self._handle_processing_metrics(frame)
         elif isinstance(frame, ErrorFrame):
-            if self._errors is None:
+            if compat.ErrorObserver is None:
                 await self._handle_error_frame(frame, data)
         elif isinstance(frame, (VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame)):
             # VAD frames are broadcast as two copies; the downstream one is enough.
@@ -563,13 +541,8 @@ class TailObserver(BaseObserver):
         await super().on_pipeline_started()
         await self._rtvi.on_pipeline_started()
         self._pipeline_finished = False
-        processors = self._processors
         pipeline = _pipeline_of(self._worker) if self._worker is not None else None
-        if pipeline is not None:
-            try:
-                processors = _pipeline_processor_names(pipeline)
-            except Exception:
-                processors = self._processors
+        processors = _pipeline_processor_names(pipeline) if pipeline is not None else []
         await self.send_tail_message(
             TailPipelineStartedMessage(
                 data={"processors": list(processors), "capabilities": compat.capabilities()}

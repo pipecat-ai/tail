@@ -109,24 +109,9 @@ class TailWebSocketServer:
         self._first_client_seen = False
 
     @property
-    def host(self) -> str:
-        """Address the server binds to."""
-        return self._host
-
-    @property
-    def port(self) -> int:
-        """Port the server binds to."""
-        return self._port
-
-    @property
     def url(self) -> str:
         """URL a Tail client should connect to."""
         return f"ws://{self._host}:{self._port}"
-
-    @property
-    def connected(self) -> bool:
-        """Whether a client is connected."""
-        return self._client is not None
 
     async def start(self) -> None:
         """Start serving."""

@@ -30,9 +30,6 @@ from pydantic import BaseModel, Field
 TAIL_LABEL = "tail"
 """Label carried by every message Tail generates itself."""
 
-RTVI_LABEL = "rtvi-ai"
-"""Label carried by RTVI messages forwarded from Pipecat."""
-
 PROTOCOL_VERSION = "3"
 """Version of the Tail wire protocol."""
 
@@ -288,13 +285,3 @@ class TailBusMessage(TailMessage):
 
     type: Literal["tail-bus"] = "tail-bus"
     data: dict[str, Any]
-
-
-def message_label(message: Mapping[str, Any]) -> Optional[str]:
-    """Return the label of a wire message, or ``None`` when it has none.
-
-    Args:
-        message: A decoded wire message.
-    """
-    label = message.get("label")
-    return label if isinstance(label, str) else None
