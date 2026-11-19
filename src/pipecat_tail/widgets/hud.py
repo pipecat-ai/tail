@@ -39,7 +39,7 @@ from pipecat_tail.state import (
 from pipecat_tail.widgets import palette
 from pipecat_tail.widgets.graphics import big_number, fit, pad, stacked
 from pipecat_tail.widgets.latency import parts_of, stage_name, turn_bar
-from pipecat_tail.widgets.render import fmt_elapsed, fmt_latency_digits, truncate
+from pipecat_tail.widgets.render import fmt_elapsed, fmt_latency_digits, fmt_secs, truncate
 
 CAT = "ᓚᘏᗢ"
 
@@ -62,14 +62,6 @@ STATS_HUD = 132
 
 PERCENTILE_SAMPLES = 20
 """Below this many answers, the worst one is shown instead of a p95."""
-
-
-def _secs(value: Optional[float]) -> str:
-    if value is None:
-        return "—"
-    if value < 1.0:
-        return f"{value * 1000:.0f} ms"
-    return f"{value:.2f} s"
 
 
 def _phase_color(phase: str) -> str:
@@ -298,7 +290,7 @@ class Hud(Widget):
             digits = big_number("-.--", p.border, "s", p.border)
             caption = [
                 Text("voice-to-voice", style=Style(color=p.muted)),
-                Text(f"target {_secs(target)}", style=Style(color=p.muted)),
+                Text(f"target {fmt_secs(target)}", style=Style(color=p.muted)),
                 Text(""),
             ]
             return [Text(" ") + d for d in digits], caption
@@ -320,7 +312,7 @@ class Hud(Widget):
         caption = [
             Text("voice-to-voice", style=Style(color=p.muted)),
             Text("target ", style=Style(color=p.muted))
-            + Text(_secs(target), style=Style(color=p.text)),
+            + Text(fmt_secs(target), style=Style(color=p.text)),
             Text(
                 f"{mark} {sign}{abs(delta):.2f} s",
                 style=Style(color=palette.latency_color(seconds), bold=True),
@@ -360,7 +352,7 @@ class Hud(Widget):
         if live:
             label.append(" so far", style=Style(color=p.muted))
         else:
-            label.append(f"  {_secs(total)}", style=Style(color=palette.latency_color(total)))
+            label.append(f"  {fmt_secs(total)}", style=Style(color=palette.latency_color(total)))
         scale = max(2.0, float(math.ceil(total)))
         bar_w = max(8, width - 2)
         head = self._target_line(label, scale, bar_w)
@@ -380,7 +372,7 @@ class Hud(Widget):
                 call = _running_call(session) if live and index == len(phases) - 1 else None
                 if call:
                     item.append(f" {call}", style=Style(color=p.dim))
-            item.append(f" {_secs(secs)}", style=Style(color=p.bright, bold=True))
+            item.append(f" {fmt_secs(secs)}", style=Style(color=p.bright, bold=True))
             if live and index == len(phases) - 1 and name == "llm":
                 note = Text(", no first token yet", style=Style(color=p.muted))
             items.append(item)
@@ -400,14 +392,14 @@ class Hud(Widget):
             label = Text("greeting", style=Style(color=p.text))
         else:
             label = Text(f"turn {record.turn or '?'}", style=Style(color=p.text))
-        label.append(f"  {_secs(record.latency_secs)}", style=Style(color=color, bold=True))
+        label.append(f"  {fmt_secs(record.latency_secs)}", style=Style(color=color, bold=True))
         scale = max(2.0, float(math.ceil(record.latency_secs)))
         bar_w = max(8, width - 2)
         head = self._target_line(label, scale, bar_w)
         bar = turn_bar(record, scale / bar_w, bar_w)
         items = [
             Text(stage_name(key), style=Style(color=c))
-            + Text(f" {_secs(secs)}", style=Style(color=p.bright, bold=True))
+            + Text(f" {fmt_secs(secs)}", style=Style(color=p.bright, bold=True))
             for secs, c, key, _ in parts_of(record)
         ]
         if items:
@@ -431,7 +423,7 @@ class Hud(Widget):
         if at > line.cell_len + 1:
             line = pad(line, at)
             line.append("┊", style=Style(color=p.dim))
-            note = f" {_secs(target)} target"
+            note = f" {fmt_secs(target)} target"
             if line.cell_len + len(note) <= bar_w + 2:
                 line.append(note, style=Style(color=p.muted))
         return line
@@ -445,7 +437,7 @@ class Hud(Widget):
 
         def value(seconds: Optional[float]) -> Text:
             color = palette.latency_color(seconds) if seconds else p.dim
-            return Text(_secs(seconds), style=Style(color=color, bold=True))
+            return Text(fmt_secs(seconds), style=Style(color=color, bold=True))
 
         first = Text("median ", style=muted) + value(percentile(latencies, 0.5))
         if len(latencies) >= PERCENTILE_SAMPLES:

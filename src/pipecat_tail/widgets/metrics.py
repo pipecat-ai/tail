@@ -40,12 +40,6 @@ SPARK_POINTS = 30
 """How many recent measurements a row's sparkline shows."""
 
 
-def _ms(seconds: Optional[float]) -> str:
-    if seconds is None:
-        return "—"
-    return f"{seconds * 1000:.0f} ms" if seconds < 1 else f"{seconds:.2f} s"
-
-
 def _short(name: str) -> str:
     return name[:-2] if name.endswith("#0") else name
 
@@ -88,18 +82,20 @@ def latency_rows(session: WorkerSession, width: int) -> Group | Text:
             extra = session.metrics[(processor, kind)][-1].extra
             note = ""
             if extra.get("thinking_time_secs") is not None:
-                note = f"thinking {_ms(extra['thinking_time_secs'])}"
+                note = f"thinking {fmt_secs(extra['thinking_time_secs'])}"
             elif extra.get("leading_silence_secs") is not None:
-                note = f"leading silence {_ms(extra['leading_silence_secs'])}"
+                note = f"leading silence {fmt_secs(extra['leading_silence_secs'])}"
             rows.append(
                 (
                     processor,
                     {
                         "metric": Text(kind, style=Style(color=p.text)),
                         "recent": sparkline(recent, lambda v, c=color: c, lo=0.0),
-                        "last": Text(_ms(values[-1]), style=Style(color=p.bright, bold=True)),
-                        "median": Text(_ms(percentile(values, 0.5)), style=Style(color=p.text)),
-                        "worst": Text(_ms(max(values)), style=Style(color=p.text)),
+                        "last": Text(fmt_secs(values[-1]), style=Style(color=p.bright, bold=True)),
+                        "median": Text(
+                            fmt_secs(percentile(values, 0.5)), style=Style(color=p.text)
+                        ),
+                        "worst": Text(fmt_secs(max(values)), style=Style(color=p.text)),
                         "n": Text(str(len(values)), style=Style(color=p.dim)),
                         "note": Text(note, style=Style(color=p.muted)),
                     },

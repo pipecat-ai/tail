@@ -233,10 +233,6 @@ def render_early_end(turn: Turn) -> Text:
     return Text(label, style=Style(color=p.warn, bold=True))
 
 
-def _latency(seconds: float) -> str:
-    return f"{seconds:.2f} s" if seconds >= 1 else f"{seconds * 1000:.0f} ms"
-
-
 def turn_flags(turn: Turn) -> Text:
     """What a turn's header says about it: what went wrong, then how long it took.
 
@@ -254,7 +250,7 @@ def turn_flags(turn: Turn) -> Text:
         color = palette.latency_color(secs)
         greeting = bool(turn.latency and turn.latency.first_bot_speech)
         item = Text("greeting ", style=muted) if greeting else Text()
-        item.append(_latency(secs), style=Style(color=color, bold=True))
+        item.append(fmt_secs(secs), style=Style(color=color, bold=True))
         grade = palette.latency_grade(secs)
         if not greeting and grade in ("slow", "too slow"):
             item.append(f" {'▲' if grade == 'slow' else '✕'} {grade}", style=Style(color=color))
