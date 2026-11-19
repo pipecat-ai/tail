@@ -90,7 +90,6 @@ class LogsView(Vertical):
         self.pattern: Optional[re.Pattern] = None
         self.following = True
         self._shown = 0
-        self._matches = 0
         self._state: Optional[SessionState] = None
         self._compact = False
 
@@ -176,7 +175,6 @@ class LogsView(Vertical):
         """Rewrite the lines from the state's log records."""
         self.lines.clear()
         self._shown = 0
-        self._matches = 0
         if self._state is None:
             self._update_title()
             return
@@ -202,8 +200,6 @@ class LogsView(Vertical):
         if not self.accepts(record):
             return
         self._shown += 1
-        if self.pattern:
-            self._matches += 1
         if self._compact:
             # The scrollbar takes two columns of the content region.
             width = max(20, self.lines.scrollable_content_region.width - 2)
@@ -256,7 +252,8 @@ class LogsView(Vertical):
     def _update_title(self) -> None:
         pieces = ["logs", f"level {self.level}"]
         if self.pattern:
-            pieces.append(f"/{self.pattern.pattern}/ {self._matches} matches")
+            # Only matching records are shown while searching.
+            pieces.append(f"/{self.pattern.pattern}/ {self._shown} matches")
         if not self.following:
             pieces.append("paused")
         self.lines.border_title = " · ".join(pieces)

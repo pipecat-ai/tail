@@ -587,7 +587,7 @@ async def test_early_end_of_turn_shows_where_it_happened():
         assert "1 early end" in rendered(app.hud)
         assert "early" in rendered(app.live.voice)
 
-        page = as_text(inspect_turn(turn, session, 140, app.state.now()))
+        page = as_text(inspect_turn(turn, 140, app.state.now()))
         assert "Pipecat ended your turn after “Nice.” and the LLM started on it" in page
 
 

@@ -104,11 +104,7 @@ class VoiceTimeline(Widget):
 
     DEFAULT_CSS = """
     VoiceTimeline {
-        height: 9;
-        border: round $border;
-        border-title-color: $text-muted;
         border-subtitle-color: $text-muted;
-        border-title-style: bold;
         padding: 0 1;
     }
     """

@@ -161,8 +161,6 @@ def render_bot_text(turn: Turn, chips: bool = True) -> Text:
     text = Text()
     last: list[tuple[str, ...]] = [()]
     for segment in turn.segments:
-        if segment.output_type == "backchannel":
-            continue
         piece = _segment_text(segment, unspoken_style, chips, last)
         if not segment.will_be_spoken:
             piece.stylize(Style(color=p.text, bold=False, italic=True))
@@ -344,7 +342,7 @@ def turn_header(turn: Turn, *, selected: bool = False) -> Table:
     return grid
 
 
-def _collapsed_turn(turn: Turn, selected: bool, width: int, highlight: Optional[str]) -> Group:
+def _collapsed_turn(turn: Turn, selected: bool, highlight: Optional[str]) -> Group:
     """A past turn as its header and a line each for the user and the bot."""
     p = palette.current()
     table = Table.grid(expand=True)
@@ -413,7 +411,7 @@ def turn_table(
     p = palette.current()
     compact = 0 < width < COMPACT_TURN_WIDTH
     if compact and collapsed:
-        return _collapsed_turn(turn, selected, width, highlight)
+        return _collapsed_turn(turn, selected, highlight)
     table = Table.grid(expand=True, padding=(0, 0))
     table.add_column(width=4 if compact else 5, no_wrap=True)
     table.add_column(ratio=1)
@@ -546,10 +544,6 @@ def turn_table(
 class TurnBlock(Static):
     """One turn in a conversation list."""
 
-    DEFAULT_CSS = """
-    TurnBlock { margin-bottom: 0; }
-    """
-
     class Picked(Message):
         """A turn was clicked."""
 
@@ -579,7 +573,7 @@ class TurnBlock(Static):
                 now,
                 selected=selected,
                 width=self._width,
-                collapsed=self.view.collapse_past and not selected and not current,
+                collapsed=not selected and not current,
                 highlight=self.view.search_text,
             )
         )
@@ -611,9 +605,6 @@ class ConversationView(VerticalScroll):
 
     DEFAULT_CSS = """
     ConversationView {
-        border: round $border;
-        border-title-color: $text-muted;
-        border-title-style: bold;
         border-subtitle-color: $text-muted;
         padding: 0 1;
     }
@@ -623,26 +614,19 @@ class ConversationView(VerticalScroll):
         self,
         *,
         id: str,
-        max_turns: Optional[int] = None,
         now=time.time,
-        collapse_past: bool = False,
         errors: Optional[Callable[[], list[ErrorRecord]]] = None,
     ):
         """Create the view.
 
         Args:
             id: Widget id.
-            max_turns: Show only the most recent turns.
             now: Clock on the bot's time.
-            collapse_past: In a narrow pane, draw past turns on two lines so
-                more of them fit.
             errors: The session's errors, so a turn an error happened in
                 counts as an issue.
         """
         super().__init__(id=id)
         self.session: Optional[WorkerSession] = None
-        self.max_turns = max_turns
-        self.collapse_past = collapse_past
         self.following = True
         self.selected_turn: Optional[Turn] = None
         self.now = now
@@ -690,10 +674,7 @@ class ConversationView(VerticalScroll):
         yield self._room
 
     def _visible_turns(self, session: WorkerSession) -> list[Turn]:
-        turns = [t for t in session.turns if t.has_content or t is session.current_turn]
-        if self.max_turns:
-            turns = turns[-self.max_turns :]
-        return turns
+        return [t for t in session.turns if t.has_content or t is session.current_turn]
 
     def sync(self, session: WorkerSession, *, full: bool = False) -> None:
         """Bring the blocks in line with the session's turns."""
@@ -740,8 +721,7 @@ class ConversationView(VerticalScroll):
 
     def latest_line(self) -> Optional[int]:
         """Where the conversation ends, in the view's scrolled space."""
-        blocks = [block for block in self._blocks.values() if block.display]
-        return max((block.virtual_region.bottom for block in blocks), default=None)
+        return max((block.virtual_region.bottom for block in self._blocks.values()), default=None)
 
     def _follow(self) -> None:
         """Jump only when the latest line would leave the view, putting it in the middle."""

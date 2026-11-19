@@ -534,9 +534,9 @@ class ErrorBanner(Widget):
         super().__init__(id="banner")
         self.state = state
 
-    def update_from(self, state: SessionState) -> None:
+    def update_from(self) -> None:
         """Show the banner when there are errors that have not been dismissed."""
-        self.set_class(bool(state.active_errors), "visible")
+        self.set_class(bool(self.state.active_errors), "visible")
         self.refresh()
 
     def render(self):

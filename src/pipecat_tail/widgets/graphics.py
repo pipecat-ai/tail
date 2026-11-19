@@ -310,22 +310,14 @@ def meter(
     width: int,
     stops: Sequence[str],
     track: str,
-    *,
-    peak: Optional[float] = None,
-    peak_color: Optional[str] = None,
 ) -> Text:
-    """Horizontal level meter with eighth-block precision and a peak marker."""
+    """Horizontal level meter with eighth-block precision."""
     text = Text()
     filled = max(0.0, min(1.0, level)) * width
-    peak_cell = (
-        None if peak is None or peak <= 0.02 else min(width - 1, int(min(1.0, peak) * width))
-    )
     for c in range(width):
         color = gradient(stops, c / max(width - 1, 1))
         f = max(0.0, min(1.0, filled - c))
-        if c == peak_cell and f < 1:
-            text.append("▏", style=Style(color=peak_color or color, bgcolor=track))
-        elif f >= 1:
+        if f >= 1:
             text.append("█", style=Style(color=color))
         elif f > 0:
             text.append(EIGHTHS[max(1, round(f * 8))], style=Style(color=color, bgcolor=track))

@@ -426,10 +426,6 @@ def speech_lanes(
     )
 
 
-class StageStats(Static):
-    """The stage table in a panel."""
-
-
 class LatencyView(Vertical):
     """The Latency view."""
 
@@ -437,9 +433,6 @@ class LatencyView(Vertical):
     LatencyView { height: 1fr; }
     LatencyView #waterfall-panel {
         height: 1fr;
-        border: round $border;
-        border-title-color: $text-muted;
-        border-title-style: bold;
         border-subtitle-color: $text-muted;
         padding: 0 1;
     }
@@ -447,16 +440,10 @@ class LatencyView(Vertical):
     LatencyView #stage-stats, LatencyView #histogram {
         width: 1fr;
         height: 100%;
-        border: round $border;
-        border-title-color: $text-muted;
-        border-title-style: bold;
         padding: 0 1;
     }
     LatencyView #speech-lanes {
         height: 8;
-        border: round $border;
-        border-title-color: $text-muted;
-        border-title-style: bold;
         padding: 0 1;
     }
     """
@@ -466,7 +453,7 @@ class LatencyView(Vertical):
         super().__init__(id="latency-view")
         self.state = state
         self.waterfall = Waterfall(state)
-        self.stats = StageStats(id="stage-stats")
+        self.stats = Static(id="stage-stats")
         self.histogram = Static(id="histogram")
         self.lanes = Static(id="speech-lanes")
 

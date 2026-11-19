@@ -73,7 +73,7 @@ def turn_as_dict(turn: Turn) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def inspect_turn(turn: Turn, session: WorkerSession, width: int, now: float) -> Group:
+def inspect_turn(turn: Turn, width: int, now: float) -> Group:
     """Render the inspector body for a turn."""
     p = palette.current()
     rows: list[Any] = []
@@ -362,7 +362,7 @@ def _schema_line(schema: dict[str, Any], width: int) -> Text:
     return line
 
 
-def context_page(turn: Turn, session: WorkerSession, width: int) -> Group:
+def context_page(turn: Turn, width: int) -> Group:
     """What the LLM saw for a turn."""
     p = palette.current()
     rows: list[Any] = []
@@ -546,8 +546,6 @@ def events_page(turn: Turn, session: WorkerSession, width: int) -> Group:
 
 
 def _indent(renderable) -> Any:
-    from rich.padding import Padding
-
     return Padding(renderable, (0, 0, 0, 6))
 
 
@@ -578,13 +576,13 @@ class TurnInspector(ModalScreen):
         Binding("y", "copy", "copy as JSON"),
     ]
 
-    def __init__(self, session: WorkerSession, turn: Turn, now, page: str = "turn"):
+    def __init__(self, session: WorkerSession, turn: Turn, now):
         """Create the inspector."""
         super().__init__()
         self.session = session
         self.turn = turn
         self.now = now
-        self.page = page if page in PAGES else "turn"
+        self.page = "turn"
         self.body = Static()
 
     HINTS = ["esc close", "tab page", "←→ turn", "↑↓ scroll", "y copy as JSON"]
@@ -630,11 +628,11 @@ class TurnInspector(ModalScreen):
         # What's left inside the border, the padding and a scrollbar.
         width = (panel.size.width or 128) - 8
         if self.page == "context":
-            body = context_page(self.turn, self.session, width)
+            body = context_page(self.turn, width)
         elif self.page == "events":
             body = events_page(self.turn, self.session, width)
         else:
-            body = inspect_turn(self.turn, self.session, width, self.now())
+            body = inspect_turn(self.turn, width, self.now())
         self.body.update(body)
 
     def _turns(self) -> list[Turn]:
@@ -660,8 +658,3 @@ class TurnInspector(ModalScreen):
         data = json.dumps(turn_as_dict(self.turn), indent=2, default=str)
         self.app.copy_to_clipboard(data)
         self.app.notify(f"Copied turn {self.turn.number} as JSON", timeout=2)
-
-
-def find_turn(session: WorkerSession, number: Optional[int]) -> Optional[Turn]:
-    """Find a turn by number."""
-    return session.turn_by_number(number)

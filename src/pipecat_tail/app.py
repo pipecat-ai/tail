@@ -54,7 +54,7 @@ from pipecat_tail.state import (
 )
 from pipecat_tail.widgets import palette
 from pipecat_tail.widgets.flow import PipelineFlow
-from pipecat_tail.widgets.hud import VIEWS, ErrorBanner, Hud, KeyBar, TitleBar
+from pipecat_tail.widgets.hud import ErrorBanner, Hud, KeyBar, TitleBar
 from pipecat_tail.widgets.inspector import TurnInspector
 from pipecat_tail.widgets.latency import LatencyView
 from pipecat_tail.widgets.logs import LogsView
@@ -98,13 +98,11 @@ class LiveView(Vertical):
     def __init__(self, state: SessionState, url: str, demo_hint: bool):
         """Create the view."""
         super().__init__(id="live")
-        self.state = state
         self.splash = Splash(state, url, demo_hint=demo_hint)
         self.voice = VoiceTimeline(state)
         self.conversation = ConversationView(
             id="live-conversation",
             now=state.now,
-            collapse_past=True,
             errors=lambda: state.errors,
         )
         self.search = Input(
@@ -385,7 +383,7 @@ class TailApp(App):
             self.hud.refresh()
             self._show_looking_back()
         if ERRORS in dirty:
-            self.banner.update_from(self.state)
+            self.banner.update_from()
         if CONVERSATION in dirty:
             self.live.conversation.sync(session)
         if VOICE in dirty:
@@ -513,11 +511,6 @@ class TailApp(App):
     @on(TurnBlock.Picked)
     def _on_turn_picked(self, event: TurnBlock.Picked) -> None:
         self._inspect(event.turn)
-
-    @property
-    def active_tab(self) -> str:
-        """The current view."""
-        return self.view
 
     def _inspect(self, turn: Optional[Turn]) -> None:
         if turn is None:
@@ -650,7 +643,7 @@ class TailApp(App):
     def action_dismiss_error(self) -> None:
         """Hide the error banner."""
         self.state.dismiss_errors()
-        self.banner.update_from(self.state)
+        self.banner.update_from()
 
     def action_next_worker(self) -> None:
         """Scope the views to the next pipeline worker."""
@@ -699,4 +692,4 @@ class TailApp(App):
             event.stop()
 
 
-__all__ = ["TailApp", "VIEWS"]
+__all__ = ["TailApp"]

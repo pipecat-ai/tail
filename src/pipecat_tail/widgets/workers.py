@@ -171,7 +171,6 @@ class BusFeed(ShownLog):
         self.border_title = "bus"
         self.filter_index = 0
         self.note = ""
-        self._count = 0
         self._hidden = 0
         self._update_subtitle()
 
@@ -202,7 +201,6 @@ class BusFeed(ShownLog):
     def rebuild(self, state: SessionState) -> None:
         """Rewrite the feed from the state's bus records."""
         self.clear()
-        self._count = 0
         self._hidden = 0
         for record in list(state.bus)[-MAX_BUS_LINES:]:
             self.append(record)
@@ -214,7 +212,6 @@ class BusFeed(ShownLog):
             self._hidden += 1
             self._update_subtitle()
             return
-        self._count += 1
         self.write(_render_bus_record(record))
         self._update_subtitle()
 

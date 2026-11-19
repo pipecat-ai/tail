@@ -331,9 +331,7 @@ class StartupPanel(Static):
                 text.append(f"  {fmt_secs(start):>8}", style=palette.style("dim"))
             if with_bar:
                 text.append("  ")
-                text.append_text(
-                    bar(duration / longest, bar_width, palette.current().user, empty=" ")
-                )
+                text.append_text(bar(duration / longest, bar_width, palette.current().user))
             text.append("\n")
         text.append("\n")
         items: list[Text] = []

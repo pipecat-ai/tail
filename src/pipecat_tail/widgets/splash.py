@@ -226,7 +226,6 @@ class Splash(Vertical):
     def __init__(self, state: SessionState, url: str = "", *, demo_hint: bool = True):
         """Create the screen."""
         super().__init__(id="splash")
-        self.state = state
         self.logo = SplashLogo()
         self.pulse = SplashPulse(state, url)
         self.howto = SplashHowTo(demo_hint)

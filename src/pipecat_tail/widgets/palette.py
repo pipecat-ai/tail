@@ -224,15 +224,15 @@ CONTRIBUTION_NAMES = {
 }
 
 
-def contribution_color(key: str, palette: Palette | None = None) -> str:
+def contribution_color(key: str) -> str:
     """Color of a latency contribution."""
-    p = palette or current()
+    p = current()
     return getattr(p, CONTRIBUTION_ROLES.get(key, "dim"))
 
 
-def processor_color(name: str, palette: Palette | None = None) -> str:
+def processor_color(name: str) -> str:
     """Color of a processor by the kind of service its name suggests."""
-    p = palette or current()
+    p = current()
     if "Transport" in name or "Input" in name and "Transport" in name:
         return p.accent
     if "STT" in name or "Transcri" in name:
@@ -275,9 +275,9 @@ def latency_grade(seconds: float | None) -> str:
     return "too slow"
 
 
-def latency_color(seconds: float | None, palette: Palette | None = None) -> str:
+def latency_color(seconds: float | None) -> str:
     """Green on target, amber slow, red too slow (see ``latency_grade``)."""
-    p = palette or current()
+    p = current()
     if seconds is None:
         return p.dim
     return {"on target": p.ok, "slow": p.warn}.get(latency_grade(seconds), p.err)

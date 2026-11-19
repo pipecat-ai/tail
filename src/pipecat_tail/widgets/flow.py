@@ -150,9 +150,6 @@ class PipelineFlow(Widget):
     DEFAULT_CSS = """
     PipelineFlow {
         height: 1fr;
-        border: round $border;
-        border-title-color: $text-muted;
-        border-title-style: bold;
         border-subtitle-color: $text-muted;
         padding: 0 1;
     }
