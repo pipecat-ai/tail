@@ -20,6 +20,7 @@ from pipecat_tail.widgets.render import (
     fmt_clock,
     fmt_elapsed,
     status_dot,
+    status_style,
     truncate,
 )
 
@@ -89,7 +90,7 @@ class WorkerTree(Tree):
             label.append(f" {name}", style=palette.style("bright", bold=True))
             kind = "PipelineWorker" if session or (info and info.processors) else "Worker"
             label.append(f"  {kind}", style=palette.style("dim"))
-            label.append(f"  {status}", style=_status_style(status))
+            label.append(f"  {status}", style=status_style(status))
             if name == state.selected_worker:
                 label.append("  ◂ selected", style=palette.style("warn"))
             if info and info.error:
@@ -111,16 +112,6 @@ class WorkerTree(Tree):
         self.root.expand()
 
 
-def _status_style(status: str):
-    if status in ("running", "ready"):
-        return palette.style("ok")
-    if status in ("error", "failed"):
-        return palette.style("err", bold=True)
-    if status in ("starting", "known"):
-        return palette.style("warn")
-    return palette.style("dim")
-
-
 class JobsTable(DataTable):
     """Jobs requested over the bus, newest first."""
 
@@ -138,7 +129,7 @@ class JobsTable(DataTable):
         self.clear()
         jobs = sorted(state.jobs.values(), key=lambda j: j.requested_at, reverse=True)
         for job in jobs[:200]:
-            status = Text(job.status, style=_job_style(job.status))
+            status = Text(job.status, style=status_style(job.status))
             self.add_row(
                 Text(job.job_id[:8], style=palette.style("text")),
                 job.job_name or "",
@@ -150,16 +141,6 @@ class JobsTable(DataTable):
                 truncate(job.last or "", 40),
                 key=job.job_id,
             )
-
-
-def _job_style(status: str):
-    if status == "running":
-        return palette.style("ok")
-    if status in ("error", "failed"):
-        return palette.style("err", bold=True)
-    if status == "cancelled":
-        return palette.style("warn")
-    return palette.style("dim")
 
 
 class BusFeed(ShownLog):

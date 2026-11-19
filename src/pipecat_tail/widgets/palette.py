@@ -230,6 +230,11 @@ def contribution_color(key: str) -> str:
     return getattr(p, CONTRIBUTION_ROLES.get(key, "dim"))
 
 
+def short_name(processor: str) -> str:
+    """A processor's name without the ``#0`` of the only one of its kind."""
+    return processor[:-2] if processor.endswith("#0") else processor
+
+
 def processor_color(name: str) -> str:
     """Color of a processor by the kind of service its name suggests."""
     p = current()
@@ -283,6 +288,11 @@ def latency_grade(seconds: float | None) -> str:
     if seconds < LATENCY_TARGET_SECS * SLOW_FACTOR:
         return "slow"
     return "too slow"
+
+
+def latency_mark(grade: str) -> str:
+    """The mark that goes with a grade, so it never relies on color alone."""
+    return {"on target": "✓", "slow": "▲"}.get(grade, "✕")
 
 
 def latency_color(seconds: float | None) -> str:

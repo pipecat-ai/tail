@@ -277,7 +277,7 @@ def turn_issues(turn: Turn) -> list[Text]:
     if turn.latency_secs is not None and not greeting:
         grade = palette.latency_grade(turn.latency_secs)
         if grade in ("slow", "too slow"):
-            mark = "▲" if grade == "slow" else "✕"
+            mark = palette.latency_mark(grade)
             color = palette.latency_color(turn.latency_secs)
             issues.append(Text(f"{mark} {grade}", style=Style(color=color, bold=True)))
     kind = str((turn.marker or {}).get("kind") or "")

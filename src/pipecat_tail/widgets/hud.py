@@ -306,7 +306,7 @@ class Hud(Widget):
             ]
             return [Text(" ") + d for d in digits], caption
         grade = palette.latency_grade(seconds)
-        mark = {"on target": "✓", "slow": "▲"}.get(grade, "✕")
+        mark = palette.latency_mark(grade)
         delta = seconds - target
         sign = "+" if delta >= 0 else "-"
         caption = [

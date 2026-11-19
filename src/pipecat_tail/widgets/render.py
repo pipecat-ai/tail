@@ -87,12 +87,26 @@ def bar(fraction: float, width: int, color: str) -> Text:
     return Text("█" * filled, style=Style(color=color)) + Text(" " * (width - filled))
 
 
+_STATUS_ROLES = {
+    "connected": "ok",
+    "running": "ok",
+    "ready": "ok",
+    "connecting": "warn",
+    "idle": "warn",
+    "starting": "warn",
+    "known": "warn",
+    "cancelled": "warn",
+    "error": "err",
+    "failed": "err",
+}
+
+
+def status_style(status: str) -> Style:
+    """How a connection, worker or job status is drawn: green going, amber in between, red failed."""
+    role = _STATUS_ROLES.get(status, "dim")
+    return palette.style(role, bold=role == "err")
+
+
 def status_dot(status: str) -> Text:
-    """A colored dot for a connection or worker status."""
-    if status in ("connected", "running", "ready"):
-        return Text("●", style=palette.style("ok"))
-    if status in ("connecting", "idle", "starting", "known"):
-        return Text("●", style=palette.style("warn"))
-    if status in ("error", "failed"):
-        return Text("●", style=palette.style("err", bold=True))
-    return Text("○", style=palette.style("dim"))
+    """A colored dot for a status, hollow once it's done."""
+    return Text("●" if status in _STATUS_ROLES else "○", style=status_style(status))

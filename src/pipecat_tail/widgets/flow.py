@@ -47,10 +47,6 @@ def _rates(rates: dict[str, float]) -> str:
     return " · ".join(parts)
 
 
-def _short(name: str) -> str:
-    return name[:-2] if name.endswith("#0") else name
-
-
 def _busy(session: WorkerSession, name: str) -> Optional[str]:
     if "LLM" in name and "Aggregator" not in name and session.llm_active:
         return "generating"
@@ -82,7 +78,10 @@ def processor_rows(
         pulse = "●" if active and int(now * 4) % 2 == 0 else ("○" if active else "·")
         left.append(pulse + " ", style=Style(color=color if active else p.border))
         left.append("◆ " if service else "◇ ", style=Style(color=color, bold=service))
-        left.append(_short(name), style=Style(color=p.bright if service else p.dim, bold=service))
+        left.append(
+            palette.short_name(name),
+            style=Style(color=p.bright if service else p.dim, bold=service),
+        )
         base = left.copy()
         busy = _busy(session, name)
         if busy:

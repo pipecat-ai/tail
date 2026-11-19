@@ -40,10 +40,6 @@ SPARK_POINTS = 30
 """How many recent measurements a row's sparkline shows."""
 
 
-def _short(name: str) -> str:
-    return name[:-2] if name.endswith("#0") else name
-
-
 def _services(session: WorkerSession) -> list[str]:
     """Services with metrics or usage, in pipeline order, then any others."""
     seen = {processor for processor, _ in session.metrics} | {
@@ -145,7 +141,7 @@ def latency_rows(session: WorkerSession, width: int) -> Group | Text:
     for processor in dict.fromkeys(proc for proc, _ in rows):
         color = palette.processor_color(processor)
         name = Text("◆ ", style=Style(color=color))
-        name.append(_short(processor), style=Style(color=p.bright, bold=True))
+        name.append(palette.short_name(processor), style=Style(color=p.bright, bold=True))
         blocks.append(name)
         for _, row in (r for r in rows if r[0] == processor):
             blocks.append(line(row))
@@ -174,7 +170,7 @@ def usage_rows(session: WorkerSession, width: int) -> Group | Text:
                 continue
             color = palette.processor_color(processor)
             head = Text("◆ ", style=Style(color=color))
-            head.append(_short(processor), style=Style(color=p.bright, bold=True))
+            head.append(palette.short_name(processor), style=Style(color=p.bright, bold=True))
             if totals.model:
                 head.append(f"  {totals.model}", style=Style(color=p.muted))
             items: list[Text] = []
