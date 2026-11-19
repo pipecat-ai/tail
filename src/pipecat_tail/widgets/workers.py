@@ -10,9 +10,8 @@ import json
 from typing import Any, Optional
 
 from rich.text import Text
-from textual import events
 from textual.containers import Horizontal, Vertical
-from textual.widgets import DataTable, RichLog, Tree
+from textual.widgets import DataTable, Tree
 
 from pipecat_tail.state import BusRecord, SessionState
 from pipecat_tail.widgets import palette

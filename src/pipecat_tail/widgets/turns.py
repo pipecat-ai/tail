@@ -40,7 +40,7 @@ from pipecat_tail.state import (
     WorkerSession,
 )
 from pipecat_tail.widgets import palette
-from pipecat_tail.widgets.graphics import image_lines, pad, spinner
+from pipecat_tail.widgets.graphics import image_lines, spinner
 from pipecat_tail.widgets.render import fmt_secs, truncate
 
 

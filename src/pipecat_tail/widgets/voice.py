@@ -12,7 +12,6 @@ bracket, backchannels and interruptions. The gap you feel in a call shows up
 as a gap on screen.
 """
 
-import time
 from typing import Optional
 
 from rich.console import Group
@@ -22,7 +21,7 @@ from textual.widget import Widget
 
 from pipecat_tail.state import THINKING, SessionState, WorkerSession
 from pipecat_tail.widgets import palette
-from pipecat_tail.widgets.graphics import block_wave, overlay, pad, spinner
+from pipecat_tail.widgets.graphics import block_wave, overlay, pad
 
 LABEL_WIDTH = 6
 WINDOWS = (10.0, 20.0, 40.0, 60.0)

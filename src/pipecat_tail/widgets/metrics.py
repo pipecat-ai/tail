@@ -15,7 +15,6 @@ from typing import Any, Optional
 
 from rich.console import Group
 from rich.style import Style
-from rich.table import Table
 from rich.text import Text
 from textual.containers import VerticalScroll
 from textual.widgets import Static

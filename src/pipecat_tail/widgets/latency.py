@@ -17,7 +17,6 @@ from typing import Optional
 from rich.console import Group
 from rich.padding import Padding
 from rich.style import Style
-from rich.table import Table
 from rich.text import Text
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widget import Widget
@@ -26,7 +25,7 @@ from textual.widgets import Static
 from pipecat_tail.state import LatencyRecord, SessionState, WorkerSession, percentile
 from pipecat_tail.widgets import palette
 from pipecat_tail.widgets.graphics import cells, meter, overlay, pack, pad, stacked
-from pipecat_tail.widgets.render import fit_hints, fmt_secs
+from pipecat_tail.widgets.render import fmt_secs
 from pipecat_tail.widgets.voice import timeline_end
 
 NO_DATA = (
