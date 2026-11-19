@@ -69,9 +69,8 @@ def processor_rows(
     names = list(session.processors) or list(session.flow)
     now = time.time()
     errors: dict[str, int] = {}
-    for error in state.errors:
-        if error.worker in (None, session.name):
-            errors[error.processor] = errors.get(error.processor, 0) + 1
+    for error in state.errors_for(session):
+        errors[error.processor] = errors.get(error.processor, 0) + 1
     lines: list[Text] = []
     last_flow = ""
     for index, name in enumerate(names):
@@ -178,7 +177,7 @@ class PipelineFlow(Widget):
         edges = len(names) * 2 - 1 <= height - 2
         lines = processor_rows(self.state, session, width, edges=edges)
         total = sum(s.out_total for s in session.flow.values())
-        errors = sum(1 for e in self.state.errors if e.worker in (None, session.name))
+        errors = len(self.state.errors_for(session))
         footer = Text(" frames ", style=Style(color=p.muted))
         footer.append(f"{total:,.0f}/s", style=Style(color=p.bright, bold=True))
         footer.append("   errors ", style=Style(color=p.muted))

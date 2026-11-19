@@ -178,7 +178,7 @@ def session_summary(state: SessionState, session: WorkerSession) -> dict[str, An
         "interruptions": session.interruptions,
         "early_ends": session.early_end_count,
         "backchannels": session.backchannel_count,
-        "errors": [_error(e) for e in state.errors if e.worker in (None, session.name)],
+        "errors": [_error(e) for e in state.errors_for(session)],
         "usage": {
             "prompt_tokens": session.prompt_tokens,
             "completion_tokens": session.completion_tokens,

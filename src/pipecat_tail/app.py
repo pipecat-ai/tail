@@ -103,7 +103,7 @@ class LiveView(Vertical):
         self.conversation = ConversationView(
             id="live-conversation",
             now=state.now,
-            errors=lambda: state.errors,
+            errors=lambda: state.errors_for(state.selected),
         )
         self.search = Input(
             placeholder="search what was said, Enter to find, Esc to close", id="live-search"

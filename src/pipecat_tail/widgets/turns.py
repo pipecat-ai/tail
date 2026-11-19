@@ -782,13 +782,10 @@ class ConversationView(VerticalScroll):
 
     def _errors_by_turn(self, turns: list[Turn]) -> dict[int, list[ErrorRecord]]:
         """Each error goes with the turn that was going on when it happened."""
-        name = self.session.name if self.session is not None else None
         # When each turn opened, on the bot's clock like the errors' times.
         opened = [(turn.opened_at, turn) for turn in turns if turn.opened_at is not None]
         by_turn: dict[int, list[ErrorRecord]] = {}
         for error in self.errors():
-            if error.worker not in (None, name):
-                continue
             during = [turn for at, turn in opened if at <= error.timestamp]
             if during:
                 by_turn.setdefault(id(during[-1]), []).append(error)

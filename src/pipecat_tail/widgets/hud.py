@@ -453,7 +453,7 @@ class Hud(Widget):
         else:
             second = Text("no answers yet", style=muted)
 
-        errors = [e for e in self.state.errors if e.worker in (None, session.name)]
+        errors = self.state.errors_for(session)
         # What went wrong in the conversation, in amber or red when it happened.
         counts = [
             (session.early_end_count, "early end", "early", p.warn),

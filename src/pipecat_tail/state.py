@@ -969,6 +969,10 @@ class SessionState:
             return selected
         return set(caps) if isinstance(caps, list) else set()
 
+    def errors_for(self, session: WorkerSession) -> list[ErrorRecord]:
+        """The errors in a session's worker, and those not tied to any worker."""
+        return [e for e in self.errors if e.worker in (None, session.name)]
+
     @property
     def active_errors(self) -> list[ErrorRecord]:
         """Errors that have not been dismissed."""
