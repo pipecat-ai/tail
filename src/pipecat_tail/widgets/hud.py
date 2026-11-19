@@ -278,8 +278,8 @@ class Hud(Widget):
         live = bot_state == THINKING and session.is_waiting(now)
         if live and session.waiting_since is not None:
             seconds = max(0.0, now - session.waiting_since)
-        elif _frozen(session, record) and session.wait_ended_at and session.wait_started_at:
-            seconds = session.wait_ended_at - session.wait_started_at
+        elif _frozen(session, record) and session.wait and session.wait.ended_at:
+            seconds = session.wait.ended_at - session.wait.started_at
         elif record is not None:
             seconds = record.latency_secs
             greeting = record.first_bot_speech
@@ -498,9 +498,10 @@ def _last_record(session: WorkerSession) -> Optional[LatencyRecord]:
 
 def _frozen(session: WorkerSession, record: Optional[LatencyRecord]) -> bool:
     """Whether the bot answered a wait that has no measured breakdown yet."""
-    if session.wait_ended_at is None or session.wait_started_at is None:
+    wait = session.wait
+    if wait is None or wait.ended_at is None:
         return False
-    return record is None or record.timestamp < session.wait_started_at
+    return record is None or record.timestamp < wait.started_at
 
 
 def _running_call(session: WorkerSession) -> Optional[str]:

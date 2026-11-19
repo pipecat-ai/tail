@@ -361,8 +361,28 @@ class SpeechEvent:
     kind: str
     timestamp: float
     started_at: Optional[float] = None
+    """When it really happened, if earlier: for raw VAD, when the speech began
+    or ended; for a user turn end, when the user went silent."""
+    turn: Optional["Turn"] = None
+    """The turn going on when it happened."""
     heard: bool = True
     """For a user turn end: whether any of the user's words had been heard."""
+    answered: bool = False
+    """For a user turn end with nothing heard: whether the bot took it up anyway."""
+
+
+@dataclass
+class Wait:
+    """A wait for the bot, from the user going silent to the bot's first words."""
+
+    started_at: float
+    """When the user went silent, on the bot's clock."""
+    ruled_at: float
+    """When Pipecat ended the user's turn."""
+    ended_at: Optional[float] = None
+    """When the bot started speaking: the wait was answered."""
+    marks: list[tuple[float, str]] = field(default_factory=list)
+    """Where the bot got to while the user waited, as ``(time, phase)``."""
 
 
 @dataclass
@@ -564,25 +584,11 @@ class WorkerSession:
         self.bot_speaking = False
         self.llm_active = False
         self.tts_active = False
-        self.waiting_since: Optional[float] = None
-        # The latest wait for the bot, from the user going silent to the
-        # bot's first words, kept after it ends until the next one starts.
-        self.wait_started_at: Optional[float] = None
-        self.wait_ruled_at: Optional[float] = None
-        self.wait_ended_at: Optional[float] = None
-        self.wait_marks: list[tuple[float, str]] = []
-        # A user turn that ended with nothing heard, as (went silent, ended),
-        # until the bot shows it's answering it.
-        self.unheard_stop: Optional[tuple[float, float]] = None
+        # The latest wait for the bot, kept once answered until the next one.
+        self.wait: Optional[Wait] = None
         # How long the VAD waits in silence before saying the user stopped
         # (its stop_secs), learned from Pipecat's measured breakdowns.
         self.endpointing_secs: Optional[float] = None
-        # The latest turn end, to tell when the user went on before the bot spoke.
-        self.ruled_at: Optional[float] = None
-        self.ruled_turn: Optional[Turn] = None
-        self.bot_spoke_since_ruling = False
-        self.last_vad_stop: Optional[float] = None
-        self.last_bot_stop: Optional[float] = None
         self.user_level = 0.0
         self.bot_level = 0.0
         self.user_wave: Deque[tuple[float, float]] = deque(maxlen=MAX_WAVE)
@@ -612,12 +618,19 @@ class WorkerSession:
             return THINKING
         return LISTENING
 
+    @property
+    def waiting_since(self) -> Optional[float]:
+        """When the user went silent, while the bot hasn't answered yet."""
+        wait = self.wait
+        return wait.started_at if wait is not None and wait.ended_at is None else None
+
     def is_waiting(self, now: float) -> bool:
         """Whether the user is waiting for the bot at ``now``.
 
         A wait the bot never answers ends after ``WAITING_GIVE_UP_SECS``.
         """
-        return self.waiting_since is not None and now - self.waiting_since <= WAITING_GIVE_UP_SECS
+        since = self.waiting_since
+        return since is not None and now - since <= WAITING_GIVE_UP_SECS
 
     def is_active(self, now: float) -> bool:
         """Whether anything is happening that the screen should follow closely.
@@ -809,10 +822,7 @@ class WorkerSession:
         self.bot_speaking = False
         self.llm_active = False
         self.tts_active = False
-        self.waiting_since = None
-        self.unheard_stop = None
-        if self.wait_ended_at is None:
-            self.wait_started_at = None
+        self.drop_wait()
         self.user_level = 0.0
         self.bot_level = 0.0
         # Rates are the last interval's counts, and no more counts are coming.
@@ -824,13 +834,14 @@ class WorkerSession:
 
     def start_wait(self, stopped: float, ruled: float) -> None:
         """Start waiting for the bot: the user went silent and their turn ended."""
-        self.waiting_since = stopped
-        self.wait_started_at = stopped
-        self.wait_ruled_at = ruled
-        self.wait_ended_at = None
-        self.wait_marks = []
+        self.wait = Wait(started_at=stopped, ruled_at=ruled)
         if self.llm_active:
-            self.wait_marks.append((ruled, "llm"))
+            self.wait.marks.append((ruled, "llm"))
+
+    def drop_wait(self) -> None:
+        """Forget a wait the bot hasn't answered: the user went on, or the bot was cut off."""
+        if self.wait is not None and self.wait.ended_at is None:
+            self.wait = None
 
     def take_up_unheard(self, timestamp: float) -> None:
         """Start the wait for a turn that ended with nothing heard, now the bot answers it.
@@ -840,12 +851,41 @@ class WorkerSession:
         starts, words turn up late, or the bot speaks. It counts from when the
         user went silent, like any other.
         """
-        unheard, self.unheard_stop = self.unheard_stop, None
-        if unheard is None or self.is_waiting(timestamp):
+        ruling = self.ruling()
+        if ruling is None or not self.is_unheard(ruling) or self.is_waiting(timestamp):
             return
-        stopped, ruled = unheard
-        if timestamp - ruled <= UNHEARD_ANSWER_SECS:
-            self.start_wait(stopped, ruled)
+        ruling.answered = True
+        if timestamp - ruling.timestamp <= UNHEARD_ANSWER_SECS:
+            self.start_wait(ruling.started_at or ruling.timestamp, ruling.timestamp)
+
+    # What the speech events say
+
+    def last_speech(self, kind: str) -> Optional[SpeechEvent]:
+        """The latest speech event of a kind, if any."""
+        return next((e for e in reversed(self.speech) if e.kind == kind), None)
+
+    def ruling(self) -> Optional[SpeechEvent]:
+        """The end of the user's latest turn, while they haven't started another."""
+        for event in reversed(self.speech):
+            if event.kind == "user_turn_started":
+                return None
+            if event.kind == "user_turn_stopped":
+                return event
+        return None
+
+    @staticmethod
+    def is_unheard(ruling: SpeechEvent) -> bool:
+        """Whether a turn ended with nothing heard, and the bot hasn't taken it up."""
+        return not ruling.heard and not ruling.answered
+
+    def bot_spoke_after(self, event: SpeechEvent) -> bool:
+        """Whether the bot started speaking after a speech event."""
+        for later in reversed(self.speech):
+            if later is event:
+                return False
+            if later.kind == "bot_speech_started":
+                return True
+        return False
 
     def mark_wait(self, timestamp: float, phase: str, *, once: bool = False) -> None:
         """Note that the bot moved to a phase while the user waits for it.
@@ -855,11 +895,12 @@ class WorkerSession:
             phase: Where the wait got to, such as ``llm`` or ``tts``.
             once: Ignore it if the phase was already reached in this wait.
         """
-        if not self.is_waiting(timestamp) or self.wait_started_at is None:
+        wait = self.wait
+        if wait is None or not self.is_waiting(timestamp):
             return
-        if once and any(name == phase for _, name in self.wait_marks):
+        if once and any(name == phase for _, name in wait.marks):
             return
-        self.wait_marks.append((timestamp, phase))
+        wait.marks.append((timestamp, phase))
 
     def wait_phases(self, now: float) -> list[tuple[str, float, float]]:
         """Where the latest wait for the bot went, as ``(phase, start, end)``.
@@ -870,11 +911,12 @@ class WorkerSession:
         what Pipecat reports starting: the end of the turn, the LLM, tool
         calls, the first sentence and speech synthesis.
         """
-        start = self.wait_started_at
-        if start is None or (not self.is_waiting(now) and self.wait_ended_at is None):
+        wait = self.wait
+        if wait is None or (wait.ended_at is None and not self.is_waiting(now)):
             return []
-        end = self.wait_ended_at if self.wait_ended_at is not None else max(now, start)
-        marks = list(self.wait_marks)
+        start = wait.started_at
+        end = wait.ended_at if wait.ended_at is not None else max(now, start)
+        marks = list(wait.marks)
         turn = self.current_turn
         for call in turn.function_calls if turn else []:
             if call.started_at is not None and call.started_at >= start:
@@ -892,8 +934,7 @@ class WorkerSession:
             else:
                 phases.append((phase, a, b))
 
-        ruled = self.wait_ruled_at if self.wait_ruled_at is not None else start
-        ruled = min(max(ruled, start), end)
+        ruled = min(max(wait.ruled_at, start), end)
         add("end of turn", start, ruled)
         cursor, phase = ruled, "waiting"
         for t, name in marks:
@@ -1146,8 +1187,6 @@ class SessionState:
                 if last is not None and last.kind == kind and abs(last.timestamp - timestamp) < 0.5:
                     # RTVI's copy of the same event got here first: correct it.
                     last.started_at = at
-                    if kind == "user_speech_stopped":
-                        session.last_vad_stop = at if at is not None else last.timestamp
                 else:
                     self._speech(session, kind, timestamp, at)
                 return {VOICE, LATENCY}
@@ -1287,76 +1326,82 @@ class SessionState:
     def _speech(
         self, session: WorkerSession, kind: str, timestamp: float, started_at: Optional[float]
     ) -> None:
-        session.speech.append(SpeechEvent(kind=kind, timestamp=timestamp, started_at=started_at))
         turn = session.current_turn
-        if kind == "user_speech_stopped":
-            session.last_vad_stop = started_at or timestamp
-        elif kind == "user_turn_stopped":
-            # Latency counts from when the user actually went silent: the VAD
-            # says so after its stop_secs of silence, and the turn is ruled
-            # over after that. Pipecat measures from the silence too, so the
-            # live clock and the measured answer agree.
-            stopped = timestamp
-            if session.last_vad_stop is not None and 0 <= timestamp - session.last_vad_stop < 5:
-                stopped = session.last_vad_stop
-                if not session.has_tail_vad:
-                    # Without the VAD's own stop_secs, use the learned one.
-                    stopped -= session.endpointing_secs or 0.0
-            session.ruled_at = timestamp
-            session.ruled_turn = turn
-            session.bot_spoke_since_ruling = False
-            heard = session.llm_active or (turn is not None and turn.has_user_content)
-            session.speech[-1].heard = heard
-            if heard:
-                session.unheard_stop = None
-                session.start_wait(stopped, timestamp)
-            else:
-                # Nothing was heard, such as a murmur the transcription
-                # dropped: Pipecat ends the turn after its stop timeout and
-                # doesn't answer it, so the bot is still listening.
-                session.unheard_stop = (stopped, timestamp)
+        # The user's latest turn end, from before this event.
+        ruling = session.ruling()
+        event = SpeechEvent(kind=kind, timestamp=timestamp, started_at=started_at, turn=turn)
+        session.speech.append(event)
+        if kind == "user_turn_stopped":
+            self._turn_stopped(session, event)
         elif kind == "user_turn_started":
-            self._check_early_end(session, timestamp)
-            if (
-                session.unheard_stop is not None
-                and turn is not None
-                and turn is session.ruled_turn
-                and not turn.has_content
-            ):
-                # The turn so far was nothing the bot heard or answered: it
-                # starts over with what the user says now.
-                turn.restart(timestamp)
-            session.unheard_stop = None
-            if session.is_waiting(timestamp):
-                # The user went on before the bot answered.
-                session.wait_started_at = None
-            session.waiting_since = None
+            self._turn_started(session, ruling, timestamp)
         elif kind == "bot_speech_started":
-            session.bot_spoke_since_ruling = True
             session.take_up_unheard(timestamp)
-            if session.is_waiting(timestamp):
-                session.wait_ended_at = timestamp
-            session.waiting_since = None
+            if session.is_waiting(timestamp) and session.wait is not None:
+                session.wait.ended_at = timestamp
+            # A wait still open was given up on: an answer this late doesn't count.
+            session.drop_wait()
             if turn is not None and turn.bot_started_at is None:
                 turn.bot_started_at = timestamp
-        elif kind == "bot_speech_stopped":
-            session.last_bot_stop = timestamp
         elif kind == "interruption":
             session.interruptions += 1
-            session.waiting_since = None
+            session.drop_wait()
             if turn is not None and turn.has_bot_content and not turn.interrupted:
                 turn.interrupted = True
 
-    def _check_early_end(self, session: WorkerSession, timestamp: float) -> None:
+    def _turn_stopped(self, session: WorkerSession, event: SpeechEvent) -> None:
+        """The user's turn ended: wait for the bot, if anything was heard."""
+        # Latency counts from when the user actually went silent: the VAD says
+        # so after its stop_secs of silence, and the turn is ruled over after
+        # that. Pipecat measures from the silence too, so the live clock and
+        # the measured answer agree.
+        stopped = event.timestamp
+        vad_stop = session.last_speech("user_speech_stopped")
+        silent = (vad_stop.started_at or vad_stop.timestamp) if vad_stop else None
+        if silent is not None and 0 <= event.timestamp - silent < 5:
+            stopped = silent
+            if not session.has_tail_vad:
+                # Without the VAD's own stop_secs, use the learned one.
+                stopped -= session.endpointing_secs or 0.0
+        event.started_at = stopped
+        turn = event.turn
+        event.heard = session.llm_active or (turn is not None and turn.has_user_content)
+        if event.heard:
+            session.start_wait(stopped, event.timestamp)
+        # Otherwise nothing was heard, such as a murmur the transcription
+        # dropped: Pipecat ends the turn after its stop timeout and doesn't
+        # answer it, so the bot is still listening.
+
+    def _turn_started(
+        self, session: WorkerSession, ruling: Optional[SpeechEvent], timestamp: float
+    ) -> None:
+        """The user started a turn: maybe the last one ended too early, or was nothing."""
+        self._check_early_end(session, ruling, timestamp)
+        turn = session.current_turn
+        if (
+            ruling is not None
+            and session.is_unheard(ruling)
+            and turn is not None
+            and turn is ruling.turn
+            and not turn.has_content
+        ):
+            # The turn so far was nothing the bot heard or answered: it starts
+            # over with what the user says now.
+            turn.restart(timestamp)
+        # The user went on before the bot answered.
+        session.drop_wait()
+
+    def _check_early_end(
+        self, session: WorkerSession, ruling: Optional[SpeechEvent], timestamp: float
+    ) -> None:
         """Note an early end when the user goes on right after their turn ended."""
-        ruled, turn = session.ruled_at, session.ruled_turn
-        session.ruled_at = None
-        if ruled is None or turn is None or session.bot_spoke_since_ruling:
+        if ruling is None or ruling.turn is None or session.bot_spoke_after(ruling):
             return
-        if session.unheard_stop is not None:
+        if session.is_unheard(ruling):
             # Nothing was heard and the bot didn't take the turn up: nothing
             # reached the LLM, so nothing ended early.
             return
+        ruled, turn = ruling.timestamp, ruling.turn
         if not 0 <= timestamp - ruled <= EARLY_END_SECS:
             return
         # The VAD heard the user start again a little before the turn started:
@@ -1369,7 +1414,8 @@ class SessionState:
                 resumed = event.started_at or event.timestamp
                 break
         heard = turn.user_llm_texts[-1] if turn.user_llm_texts else turn.user_text
-        llm_started = session.llm_active or any(n == "llm" for _, n in session.wait_marks)
+        marks = session.wait.marks if session.wait is not None else []
+        llm_started = session.llm_active or any(n == "llm" for _, n in marks)
         turn.early_ends.append(
             EarlyEnd(
                 ruled_at=ruled, resumed_at=resumed, heard=heard.strip(), llm_started=llm_started
@@ -1657,7 +1703,8 @@ class SessionState:
             case "bot-interrupted":
                 # Pipecat interrupts at every user turn start; it only cuts
                 # the bot off when the bot is speaking (or just was).
-                stopped = session.last_bot_stop
+                last_stop = session.last_speech("bot_speech_stopped")
+                stopped = last_stop.timestamp if last_stop is not None else None
                 turn = session.current_turn
                 speaking_words = bool(
                     turn and any(seg.spoken_status == "in-progress" for seg in turn.segments)
