@@ -7,17 +7,11 @@
 """A voice bot with Tail attached.
 
 Run it with the Pipecat development runner and open the dashboard in the
-same terminal::
+same terminal, with ``TailRunner``::
 
     uv run --group examples examples/bot.py
 
-or keep the bot untouched and attach Tail from outside::
-
-    PIPECAT_SETUP_FILES=$(pipecat tail setup-file) TAIL_RUNNER=0 \
-        uv run --group examples examples/bot.py
-    pipecat tail
-
-or add a ``TailObserver`` to the pipeline worker, as you would in your own
+or give the pipeline worker a ``TailObserver``, as you would in your own
 code, and open the dashboard in another terminal::
 
     TAIL_RUNNER=observer uv run --group examples examples/bot.py
@@ -99,7 +93,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]
     )
 
-    mode = os.getenv("TAIL_RUNNER", "1")
+    # "runner" (the default) or "observer".
+    mode = os.getenv("TAIL_RUNNER", "runner")
 
     # Metrics are what feed the latency breakdown and the Metrics tab.
     worker = PipelineWorker(
@@ -121,13 +116,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Client disconnected")
         await worker.cancel()
 
-    if mode == "1":
+    if mode == "observer":
+        # Plain runner: Tail comes from the observer above, and `pipecat tail`
+        # runs in another terminal.
+        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+    else:
         # The dashboard opens in this terminal and the bot's logs go to it.
         runner = TailRunner()
-    else:
-        # Plain runner: Tail comes from the observer above or from
-        # PIPECAT_SETUP_FILES, and `pipecat tail` runs in another terminal.
-        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.add_workers(worker)
     await runner.run()

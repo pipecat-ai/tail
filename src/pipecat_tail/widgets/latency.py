@@ -244,8 +244,7 @@ def stage_table(session: WorkerSession, width: int = 120) -> Group | Text:
     if not rows:
         # Turns measured, but none broken down by stage.
         return Text(
-            "No breakdown by stage yet. It arrives with enable_metrics=True in PipelineParams, "
-            "which the setup file turns on.",
+            "No breakdown by stage yet. It arrives with enable_metrics=True in PipelineParams.",
             style=Style(color=p.muted),
         )
     table = Table(

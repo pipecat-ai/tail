@@ -18,10 +18,6 @@ Wire it in code::
     runner = WorkerRunner()
     await runner.add_workers(bot, tail)
     bot.add_observer(tail.create_observer(bot))
-
-or, without touching the bot, through a setup file::
-
-    PIPECAT_SETUP_FILES=$(python -m pipecat_tail.setup) python bot.py
 """
 
 import asyncio

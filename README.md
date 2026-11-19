@@ -8,7 +8,7 @@
 
 When you talk to your voice bot, you only hear half of what happened. Did it decide you'd finished, or cut you off mid-sentence? Was that second of silence the LLM, a tool call or the speech synthesis? What did the transcription hear, and what did the LLM actually get?
 
-**Tail** shows you while you talk. It's a terminal dashboard for bots built with [Pipecat](https://github.com/pipecat-ai/pipecat), the open source framework for voice and multimodal conversational AI. It sits next to your bot, in a side pane as narrow as 48 columns or across the whole screen, and attaching it takes no code at all.
+**Tail** shows you while you talk. It's a terminal dashboard for bots built with [Pipecat](https://github.com/pipecat-ai/pipecat), the open source framework for voice and multimodal conversational AI. It sits next to your bot, in a side pane as narrow as 48 columns or across the whole screen, and attaching it takes one line.
 
 <p align="center"><img src="https://raw.githubusercontent.com/pipecat-ai/tail/refs/heads/main/tail-image.gif" alt="Tail playing its demo session: the voice-to-voice clock counting while the bot calls a flight search tool, then the bot speaking; a typed turn, a transport error and a turn Pipecat ended before the user had finished; then n stepping back through the turns where something went wrong and f following the call again" width="900"/></p>
 
@@ -19,12 +19,19 @@ uv tool install "pipecat-ai[cli]" --with pipecat-ai-tail
 pipecat tail --demo
 ```
 
-The demo plays a scripted call, with tool calls, an interruption, a typed message, a photo, an error and a turn that ended too early, so you can look around before bringing your own bot. Then start your bot with Tail's setup file, and Tail next to it:
+The demo plays a scripted call, with tool calls, an interruption, a typed message, a photo, an error and a turn that ended too early, so you can look around before bringing your own bot. Then add Tail to your bot's project, and its observer to the pipeline:
 
 ```bash
-PIPECAT_SETUP_FILES=$(pipecat tail setup-file) python bot.py
-pipecat tail    # in another terminal
+uv add pipecat-ai-tail
 ```
+
+```python
+from pipecat_tail import TailObserver
+
+worker = PipelineWorker(pipeline, observers=[TailObserver()])
+```
+
+Start the bot, and `pipecat tail` in another terminal.
 
 ## What it shows
 
@@ -78,37 +85,23 @@ Below the top are five views. The key line at the bottom lists the current view'
 
 ### Install
 
-The standalone app is a `pipecat` CLI command, which ships with Pipecat's `cli` extra:
+Tail has two halves: an observer inside your bot that reports what happens, and the dashboard that shows it. The bot's project always needs Tail:
+
+```bash
+uv add pipecat-ai-tail
+```
+
+To watch from another terminal, or another machine, install the dashboard as a `pipecat` command too. It ships with Pipecat's `cli` extra:
 
 ```bash
 uv tool install "pipecat-ai[cli]" --with pipecat-ai-tail
 ```
 
-To use Tail from your bot's code (options B and C), add it to the bot's environment:
+Keep the two on the same version of Tail.
 
-```bash
-uv pip install pipecat-ai-tail
-```
+### Option A: observer in code
 
-### Option A: attach without touching the bot
-
-Pipecat loads setup files listed in `PIPECAT_SETUP_FILES`. Tail ships one, so this is the whole integration:
-
-```bash
-PIPECAT_SETUP_FILES=$(pipecat tail setup-file) python bot.py
-```
-
-then, in another terminal:
-
-```bash
-pipecat tail
-```
-
-Every pipeline worker the bot runs gets a Tail observer, and a Tail server worker joins the runner so workers, jobs and bus traffic show up too. With Pipecat 1.0 to 1.2, which run pipelines as a `PipelineTask`, each task gets a Tail observer. Set `TAIL_HOST` and `TAIL_PORT` to change where the server listens (default `localhost:9292`).
-
-### Option B: observer in code
-
-Add `TailObserver` to your pipeline worker (a `PipelineTask` before Pipecat 1.3). It serves its own websocket:
+Add `TailObserver` to your pipeline worker (a `PipelineTask` before Pipecat 1.3). It serves its own websocket, and `pipecat tail` connects to it:
 
 ```python
 from pipecat_tail import TailObserver
@@ -127,6 +120,25 @@ await runner.add_workers(worker, tail)
 worker.add_observer(tail.create_observer(worker))
 await runner.run()
 ```
+
+### Option B: without touching the bot's code
+
+Pipecat runs the hooks of the setup files listed in `PIPECAT_SETUP_FILES`, so a file of three lines attaches Tail to a bot you'd rather not edit:
+
+```python
+# tail_setup.py
+from pipecat_tail import TailObserver
+
+async def setup_pipeline_worker(worker):
+    worker.add_observer(TailObserver())
+```
+
+```bash
+PIPECAT_SETUP_FILES=tail_setup.py python bot.py
+pipecat tail    # in another terminal
+```
+
+With Pipecat 1.0 to 1.2 the hook is `setup_pipeline_task(task)`.
 
 ### Option C: runner with the app built in
 
@@ -183,7 +195,7 @@ The standalone app reconnects on its own with backoff when the bot restarts. Pre
 
 ## Metrics
 
-The time spent in each stage (LLM, TTS, STT) and service metrics need metrics enabled on the pipeline. The setup file (option A) turns them on when the bot left them off, and says so in the log; set `TAIL_ENABLE_METRICS=0` to keep them off. In code:
+The time spent in each stage (LLM, TTS, STT) and service metrics need metrics enabled on the pipeline:
 
 ```python
 PipelineWorker(pipeline, params=PipelineParams(enable_metrics=True, enable_usage_metrics=True))
@@ -204,7 +216,7 @@ uv run pytest
 uv run --group examples examples/bot.py
 ```
 
-That opens the dashboard in the same terminal with `TailRunner` (option C). `TAIL_RUNNER=observer` runs it with a `TailObserver` instead (option B), and `TAIL_RUNNER=0` with neither, for the setup file (option A); then run `pipecat tail` in another terminal.
+That opens the dashboard in the same terminal with `TailRunner` (option C). `TAIL_RUNNER=observer` runs it with a `TailObserver` instead (option A); then run `pipecat tail` in another terminal.
 
 Changes are recorded as [towncrier](https://towncrier.readthedocs.io/) fragments in `changelog/`.
 

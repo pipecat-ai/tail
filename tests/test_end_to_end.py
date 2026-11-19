@@ -559,27 +559,3 @@ async def test_a_server_sends_each_log_line_once():
     lines = Counter((m["data"]["time"], m["data"]["message"]) for m in logs)
     assert max(lines.values()) == 1
     assert all("worker" not in m for m in logs)
-
-
-def test_setup_file_defines_every_hook():
-    from pipecat_tail import setup
-
-    for hook in ("setup_worker_runner", "setup_pipeline_worker", "setup_pipeline_task"):
-        assert callable(getattr(setup, hook))
-
-
-@needs_workers
-@pytest.mark.asyncio
-async def test_setup_file_attaches_workers_to_their_runners_server(monkeypatch):
-    # Every pipeline worker reports through its runner's server. A standalone
-    # observer of its own would try to take the server's port.
-    from pipecat_tail import setup
-
-    monkeypatch.setenv("TAIL_PORT", str(free_port()))
-    runner = WorkerRunner(handle_sigint=False)
-    await setup.setup_worker_runner(runner)
-    worker = PipelineWorker(Pipeline([FakeLLM(name="proc")]), name="bot-6")
-    await runner.add_workers(worker)
-    await setup.setup_pipeline_worker(worker)
-    (server,) = [s for s in setup._servers.values() if "bot-6" in s._observed]
-    assert server._observed["bot-6"] is worker

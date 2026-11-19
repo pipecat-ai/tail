@@ -98,11 +98,9 @@ async def test_nothing_important_is_cut(width, height):
     # The inspector's header breaks between its pieces, never inside one.
     assert "not interrupted" in shots["inspector"]
 
-    # A command too long for the line breaks where a shell can read it.
+    # Code too long for the line breaks between its arguments.
     waiting = shots["waiting"]
-    assert "setup-file) python bot.py" in waiting
-    if "$(pipecat tail setup-file)" not in waiting:
-        assert "$(pipecat tail \\" in waiting
+    assert "observers=[TailObserver()])" in waiting
 
 
 @pytest.mark.asyncio

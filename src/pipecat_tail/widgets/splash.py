@@ -131,23 +131,7 @@ class SplashHowTo(Widget):
         accent, bright, text = Style(color=p.accent), Style(color=p.bright), Style(color=p.text)
         ways: list[tuple[str, list[Text], list[Text]]] = [
             (
-                "any bot, no code changes",
-                [
-                    Text.assemble(
-                        ("$ ", prompt),
-                        ("PIPECAT_SETUP_FILES=$(pipecat tail setup-file) ", accent),
-                        ("python bot.py", bright),
-                    )
-                ],
-                [
-                    Text.assemble(
-                        ("$ ", prompt), ("PIPECAT_SETUP_FILES=$(pipecat tail \\", accent)
-                    ),
-                    Text.assemble(("    setup-file) ", accent), ("python bot.py", bright)),
-                ],
-            ),
-            (
-                "or in code",
+                "in your bot",
                 [
                     Text.assemble(
                         ("PipelineWorker(pipeline, observers=[", text),

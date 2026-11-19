@@ -58,8 +58,7 @@ def latency_rows(session: WorkerSession, width: int) -> Group | Text:
     p = palette.current()
     if not session.metrics:
         return Text(
-            "No service metrics yet. They arrive with enable_metrics=True in PipelineParams, "
-            "which the setup file turns on.",
+            "No service metrics yet. They arrive with enable_metrics=True in PipelineParams.",
             style=Style(color=p.muted),
         )
     rows: list[tuple[str, dict[str, Text]]] = []
@@ -139,8 +138,7 @@ def usage_rows(session: WorkerSession, width: int) -> Group | Text:
     p = palette.current()
     if not session.usage:
         return Text(
-            "No usage yet. It arrives with enable_usage_metrics=True in PipelineParams, "
-            "which the setup file turns on.",
+            "No usage yet. It arrives with enable_usage_metrics=True in PipelineParams.",
             style=Style(color=p.muted),
         )
     lines: list[Any] = []

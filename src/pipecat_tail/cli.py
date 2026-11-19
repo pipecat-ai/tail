@@ -175,13 +175,5 @@ def cli(
     asyncio.run(app.run())
 
 
-@entrypoint_cli_typer.command("setup-file")
-def setup_file():
-    """Print the path to pass in PIPECAT_SETUP_FILES."""
-    import pipecat_tail.setup
-
-    typer.echo(pipecat_tail.setup.__file__)
-
-
 if __name__ == "__main__":
     entrypoint_cli_typer()
