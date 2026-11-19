@@ -44,7 +44,7 @@ Start the bot, and `pipecat tail` in another terminal.
 
 ## A tour
 
-The top of the screen is always there: the bot's state (**LISTENING**, **THINKING** or **SPEAKING**), the voice-to-voice clock, the current turn's time so far and, on wide terminals, the session: median and worst response, answers on target, early ends, interruptions and errors. A processor error shows as a red line until `x` dismisses it (`e` finds it in the logs). The status line says whether a call is on (`● call 2:31`), ended, or the bot is gone and Tail is reconnecting.
+The top of the screen is always there: the bot's state (**LISTENING**, **THINKING** or **SPEAKING**), the voice-to-voice clock, the current turn's time so far and, on wide terminals, the session: median and worst response, answers on target, early ends, interruptions and errors. A processor error shows as a red line until `x` dismisses it (`e` finds it in the logs). The status line says whether a call is on (`● call 2:31`), ended, or the bot is gone and Tail is reconnecting. When a call ends, a dialog says so and how it went: its length and turns, response times, early ends, interruptions and errors.
 
 Response times are green under your target, amber up to 1.6 times it and red above, with ✓, ▲ and ✕ so they never rely on color alone. The target is 1 s; set yours with `pipecat tail --target 0.8`.
 

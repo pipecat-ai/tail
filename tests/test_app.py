@@ -491,6 +491,9 @@ async def test_the_voice_timeline_keeps_the_call_once_it_is_over():
         await pilot.pause(0.2)
         await app.handle_status("disconnected")
         await pilot.pause(0.2)
+        # Past the dialog that says the bot went away.
+        await pilot.press("enter")
+        await pilot.pause(0.2)
         assert voice.border_title == "voice · the call's last 20 s"
         # A minute later nothing moves, and the end of the call is still there.
         app.state.clock_offset = (app.state.clock_offset or 0.0) - 60
@@ -564,6 +567,72 @@ async def test_the_call_clock_runs_on_the_bots_clock():
             )
         await pilot.pause(0.2)
         assert "● call 0:05" in rendered(app.title_bar)
+
+
+@pytest.mark.asyncio
+async def test_a_dialog_says_the_call_ended_and_how_it_went():
+    from pipecat_tail.demo import WORKER
+    from pipecat_tail.widgets.ended import CallEnded
+
+    def pipeline(kind: str) -> dict:
+        return {"label": "tail", "type": kind, "worker": WORKER, "timestamp": time.time()}
+
+    app = TailApp()
+    async with app.run_test(size=(100, 40)) as pilot:
+        await feed(app, pilot)
+        assert not isinstance(app.screen, CallEnded)
+        await app.handle_message(pipeline("tail-pipeline-finished"))
+        await pilot.pause(0.3)
+        assert isinstance(app.screen, CallEnded)
+        body = as_text(app.screen.body)
+        assert app.screen.title_text == "Call ended"
+        assert "turns" in body and "answers on target" in body and "early end" in body
+        # Enter closes it, and the bot then going away is still the same call.
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+        assert not isinstance(app.screen, CallEnded)
+        await app.handle_status("disconnected")
+        await pilot.pause(0.2)
+        assert not isinstance(app.screen, CallEnded)
+
+        # The next call: the bot goes away mid-call this time.
+        await app.handle_status("connected")
+        await app.handle_message(pipeline("tail-pipeline-started"))
+        await pilot.pause(0.2)
+        await app.handle_status("disconnected")
+        await pilot.pause(0.3)
+        assert isinstance(app.screen, CallEnded)
+        assert app.screen.title_text == "The bot went away"
+        # n closes it and steps to the first turn where something went wrong.
+        await pilot.press("n")
+        await pilot.pause(0.3)
+        assert not isinstance(app.screen, CallEnded)
+        assert app.live.conversation.selected_turn is not None
+
+
+@pytest.mark.asyncio
+async def test_a_new_call_closes_the_call_ended_dialog():
+    from pipecat_tail.demo import WORKER
+    from pipecat_tail.widgets.ended import CallEnded
+
+    app = TailApp()
+    async with app.run_test(size=(100, 40)) as pilot:
+        await feed(app, pilot, until=20.0)
+        await app.handle_status("disconnected")
+        await pilot.pause(0.3)
+        assert isinstance(app.screen, CallEnded)
+        await app.handle_status("connected")
+        await app.handle_message(
+            {
+                "label": "tail",
+                "type": "tail-pipeline-started",
+                "worker": WORKER,
+                "timestamp": time.time() + 1,
+                "data": {"processors": []},
+            }
+        )
+        await pilot.pause(0.3)
+        assert not isinstance(app.screen, CallEnded)
 
 
 @pytest.mark.asyncio

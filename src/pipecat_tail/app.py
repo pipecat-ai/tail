@@ -53,6 +53,7 @@ from pipecat_tail.state import (
     Turn,
 )
 from pipecat_tail.widgets import palette
+from pipecat_tail.widgets.ended import CallEnded
 from pipecat_tail.widgets.flow import PipelineFlow
 from pipecat_tail.widgets.hud import ErrorBanner, Hud, KeyBar, TitleBar
 from pipecat_tail.widgets.inspector import TurnInspector
@@ -252,6 +253,8 @@ class TailApp(App):
         self._dirty: set[str] = set()
         self._new_bus: list = []
         self._new_logs: list = []
+        # The call the end of which was last announced, as (worker, started).
+        self._announced_call: Optional[tuple[Optional[str], Optional[float]]] = None
         self._last_slow_tick = 0.0
         self._last_frame: dict[str, float] = {}
         self.view = "live"
@@ -381,6 +384,7 @@ class TailApp(App):
             self.title_bar.refresh()
             self.hud.refresh()
             self._show_looking_back()
+            self._show_call_end()
         if ERRORS in dirty:
             self.banner.update_from()
         if CONVERSATION in dirty:
@@ -582,6 +586,19 @@ class TailApp(App):
         session = self.state.selected
         call_over = self.state.call_end(session) is not None
         self.live.set_looking_back(not self.live.conversation.following or call_over)
+
+    def _show_call_end(self) -> None:
+        """Say once that a call ended, and how it went; a new call closes that."""
+        session = self.state.selected
+        call = (session.name, session.started_at)
+        if self.state.call_end(session) is None:
+            if isinstance(self.screen, CallEnded):
+                self.screen.dismiss()
+            return
+        if call == self._announced_call:
+            return
+        self._announced_call = call
+        self.push_screen(CallEnded(self.state, session, bot_gone=not session.finished))
 
     def action_zoom(self, direction: int) -> None:
         """Show more or less time in the voice timeline."""
