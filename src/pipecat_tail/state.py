@@ -763,6 +763,26 @@ class WorkerSession:
                 return series[-1].model
         return None
 
+    def speech_spans(self, start: str, stop: str, now: float) -> list[tuple[float, float]]:
+        """When each ``start`` event kind and the ``stop`` after it happened.
+
+        One still open ends at ``now``. A stop with no start before it (the
+        start was dropped with the oldest events) starts where it says the
+        speech really ended, if it says.
+        """
+        spans: list[tuple[float, float]] = []
+        opened: Optional[float] = None
+        for event in self.speech:
+            if event.kind == start:
+                opened = event.timestamp
+            elif event.kind == stop:
+                begin = opened if opened is not None else (event.started_at or event.timestamp)
+                spans.append((begin, event.timestamp))
+                opened = None
+        if opened is not None:
+            spans.append((opened, now))
+        return spans
+
     @property
     def answers(self) -> list[LatencyRecord]:
         """The measured answers to the user, leaving out the greeting."""

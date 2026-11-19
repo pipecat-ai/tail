@@ -336,17 +336,7 @@ def speech_lanes(
 
     def lane(start_kind: str, stop_kind: str, char: str, color: str) -> Text:
         line = Text(" " * cells)
-        open_at: Optional[float] = None
-        spans = []
-        for event in session.speech:
-            if event.kind == start_kind:
-                open_at = event.timestamp
-            elif event.kind == stop_kind:
-                spans.append((open_at if open_at is not None else event.timestamp, event.timestamp))
-                open_at = None
-        if open_at is not None:
-            spans.append((open_at, now))
-        for a, b in spans:
+        for a, b in session.speech_spans(start_kind, stop_kind, now):
             if b < t0:
                 continue
             xa, xb = x(a), max(x(a) + 1, x(b))

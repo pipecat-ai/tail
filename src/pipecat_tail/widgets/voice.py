@@ -172,23 +172,9 @@ class VoiceTimeline(Widget):
 
         # Lane: raw VAD spans, turn ends and backchannels.
         lane = Text(" " * cells)
-        vad_open: Optional[float] = None
-        spans: list[tuple[float, float]] = []
-        turn_ends: list[float] = []
-        interruptions: list[float] = []
-        for event in session.speech:
-            if event.kind == "user_speech_started":
-                vad_open = event.timestamp
-            elif event.kind == "user_speech_stopped":
-                start = vad_open if vad_open is not None else (event.started_at or event.timestamp)
-                spans.append((start, event.timestamp))
-                vad_open = None
-            elif event.kind == "user_turn_stopped":
-                turn_ends.append(event.timestamp)
-            elif event.kind == "interruption":
-                interruptions.append(event.timestamp)
-        if vad_open is not None:
-            spans.append((vad_open, now))
+        spans = session.speech_spans("user_speech_started", "user_speech_stopped", now)
+        turn_ends = [e.timestamp for e in session.speech if e.kind == "user_turn_stopped"]
+        interruptions = [e.timestamp for e in session.speech if e.kind == "interruption"]
         for a, b in spans:
             if b < t0 or a > t1:
                 continue
