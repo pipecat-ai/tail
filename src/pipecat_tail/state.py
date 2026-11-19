@@ -38,7 +38,7 @@ import json
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Deque, Iterable, Optional
+from typing import Any, Deque, Iterable, NamedTuple, Optional
 
 MAX_TURNS = 300
 MAX_LOGS = 5000
@@ -313,6 +313,15 @@ class Turn:
         return None
 
 
+class Stage(NamedTuple):
+    """A stage of an answer that took time, from Pipecat's breakdown."""
+
+    key: str
+    secs: float
+    owner: str
+    start: Optional[float]
+
+
 @dataclass
 class LatencyRecord:
     """User-to-bot latency of one turn with its breakdown."""
@@ -325,6 +334,24 @@ class LatencyRecord:
     timestamp: float
     ttfb: list[dict[str, Any]] = field(default_factory=list)
     function_calls: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def stages(self) -> list[Stage]:
+        """The stages that took time, in order."""
+        stages = []
+        for c in self.contributions:
+            secs = c.get("duration_secs")
+            if isinstance(secs, (int, float)) and secs > 0:
+                start = c.get("start_time")
+                stages.append(
+                    Stage(
+                        key=str(c.get("key", "service")),
+                        secs=float(secs),
+                        owner=str(c.get("owner") or ""),
+                        start=start if isinstance(start, (int, float)) else None,
+                    )
+                )
+        return stages
 
 
 @dataclass
@@ -735,6 +762,11 @@ class WorkerSession:
             if "LLM" in processor and series and series[-1].model:
                 return series[-1].model
         return None
+
+    @property
+    def answers(self) -> list[LatencyRecord]:
+        """The measured answers to the user, leaving out the greeting."""
+        return [r for r in self.latencies if not r.first_bot_speech]
 
     @property
     def last_latency(self) -> Optional[LatencyRecord]:

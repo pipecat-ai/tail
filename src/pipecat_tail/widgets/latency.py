@@ -42,19 +42,7 @@ MEASURED_STAGES = frozenset(
 
 def parts_of(record: LatencyRecord) -> list[tuple[float, str, str, str]]:
     """A record's stages as ``(seconds, color, key, owner)``, in order."""
-    parts = []
-    for c in record.contributions:
-        secs = c.get("duration_secs")
-        if not isinstance(secs, (int, float)) or secs <= 0:
-            continue
-        key = str(c.get("key", "service"))
-        parts.append((float(secs), palette.contribution_color(key), key, str(c.get("owner") or "")))
-    return parts
-
-
-def stage_name(key: str) -> str:
-    """Short name of a stage."""
-    return palette.CONTRIBUTION_NAMES.get(key, key.replace("_", " "))
+    return [(s.secs, palette.contribution_color(s.key), s.key, s.owner) for s in record.stages]
 
 
 def note_for(record: LatencyRecord) -> Optional[Text]:
@@ -70,7 +58,7 @@ def note_for(record: LatencyRecord) -> Optional[Text]:
     if key == "function_handler":
         text.append(f"ƒ {owner} {fmt_secs(secs)}", style=Style(color=p.tool))
     else:
-        label = stage_name(key)
+        label = palette.stage_name(key)
         text.append(f"{label} {fmt_secs(secs)}", style=Style(color=color))
         if owner:
             text.append(f" · {owner}", style=Style(color=p.muted))
@@ -151,7 +139,7 @@ class Waterfall(Widget):
                     keys.append(key)
         items = [
             Text("■ ", style=Style(color=palette.contribution_color(key)))
-            + Text(stage_name(key), style=Style(color=p.dim))
+            + Text(palette.stage_name(key), style=Style(color=p.dim))
             for key in keys
         ]
         items.append(Text("┊ p50", style=Style(color=p.muted)))
@@ -169,8 +157,7 @@ class Waterfall(Widget):
         bar_w = max(10, width - head_w - tail_w - 1)
         seconds = scale_for(records)
         scale = seconds / bar_w
-        latencies = [r.latency_secs for r in records if not r.first_bot_speech]
-        p50 = percentile(latencies, 0.5)
+        p50 = percentile([r.latency_secs for r in records if not r.first_bot_speech], 0.5)
 
         axis = Text(" " * width)
         for s in range(int(seconds) + 1):
@@ -218,7 +205,7 @@ def stage_table(session: WorkerSession, width: int = 120) -> Group | Text:
     A number is never cut.
     """
     p = palette.current()
-    records = [r for r in session.latencies if not r.first_bot_speech]
+    records = session.answers
     if not records:
         return Text("No turns measured yet.", style=Style(color=p.muted))
     by_key: dict[str, list[float]] = {}
@@ -236,7 +223,7 @@ def stage_table(session: WorkerSession, width: int = 120) -> Group | Text:
         p50 = percentile(values, 0.5)
         p95 = percentile(values, 0.95)
         name = Text("■ ", style=Style(color=color))
-        name.append(stage_name(key), style=Style(color=p.text))
+        name.append(palette.stage_name(key), style=Style(color=p.text))
         rows.append(
             {
                 "stage": name,
@@ -292,7 +279,7 @@ def stage_table(session: WorkerSession, width: int = 120) -> Group | Text:
 def histogram(session: WorkerSession, width: int, height: int = 5) -> Group | Text:
     """How the turns' latencies are spread, in 200 ms bins."""
     p = palette.current()
-    values = [r.latency_secs for r in session.latencies if not r.first_bot_speech]
+    values = [r.latency_secs for r in session.answers]
     if not values:
         return Text("No turns measured yet.", style=Style(color=p.muted))
     bins_n = max(6, min(16, (width - 4) // 4))
@@ -320,7 +307,7 @@ def histogram(session: WorkerSession, width: int, height: int = 5) -> Group | Te
         labels.append(f"{i * step:<4.1f}"[:4], style=Style(color=p.muted))
     rows.append(labels)
     target = palette.latency_target()
-    under = sum(1 for v in values if v < target) / len(values)
+    under = sum(1 for v in values if palette.on_target(v)) / len(values)
     summary = Text(" p50 ", style=Style(color=p.muted))
     p50 = percentile(values, 0.5)
     p95 = percentile(values, 0.95)

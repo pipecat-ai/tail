@@ -35,7 +35,6 @@ from textual.widgets import Static
 from pipecat_tail.state import Turn, WorkerSession
 from pipecat_tail.widgets import palette
 from pipecat_tail.widgets.graphics import image_lines, pack, pad, stacked
-from pipecat_tail.widgets.latency import stage_name
 from pipecat_tail.widgets.render import fit_hints, fmt_clock, fmt_secs, truncate
 from pipecat_tail.widgets.turns import (
     compact_json,
@@ -194,22 +193,14 @@ def inspect_turn(turn: Turn, width: int, now: float) -> Group:
             rows.append(title)
             rows.append(Text(" " * (label_w + 2)) + pad(axis, bar_w))
         sequential = 0.0
-        for c in record.contributions:
-            secs = c.get("duration_secs") or 0.0
-            if secs <= 0:
-                continue
-            key = str(c.get("key", ""))
+        for stage in record.stages:
+            key, secs, owner = stage.key, stage.secs, stage.owner
             color = palette.contribution_color(key)
-            start = c.get("start_time")
-            offset = (
-                (start - origin)
-                if (origin and isinstance(start, (int, float)) and start)
-                else sequential
-            )
+            offset = (stage.start - origin) if (origin and stage.start) else sequential
             sequential = offset + secs
-            label = stage_name(key)
-            if key == "function_handler" and c.get("owner"):
-                label = f"ƒ {c.get('owner')}"
+            label = palette.stage_name(key)
+            if key == "function_handler" and owner:
+                label = f"ƒ {owner}"
             bar = stacked(
                 [(secs, color)], scale, bar_w, offset=max(0.0, offset), background=p.surface
             )
@@ -218,9 +209,8 @@ def inspect_turn(turn: Turn, width: int, now: float) -> Group:
             )
             line.append_text(pad(bar, bar_w))
             line.append(f" {secs * 1000:>6.0f} ms ", style=Style(color=p.bright, bold=True))
-            owner = c.get("owner")
             if owner and owner_w and key != "function_handler":
-                line.append(truncate(str(owner), owner_w), style=Style(color=p.muted))
+                line.append(truncate(owner, owner_w), style=Style(color=p.muted))
             rows.append(line)
         rows.append(Text(""))
 

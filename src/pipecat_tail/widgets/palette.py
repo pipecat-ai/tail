@@ -259,16 +259,26 @@ def set_latency_target(seconds: float) -> None:
     LATENCY_TARGET_SECS = max(0.05, float(seconds))
 
 
+def stage_name(key: str) -> str:
+    """Short name of a stage of an answer."""
+    return CONTRIBUTION_NAMES.get(key, key.replace("_", " "))
+
+
 def latency_target() -> float:
     """The response time the bot aims for."""
     return LATENCY_TARGET_SECS
+
+
+def on_target(seconds: float) -> bool:
+    """Whether a response time is under the target."""
+    return seconds < LATENCY_TARGET_SECS
 
 
 def latency_grade(seconds: float | None) -> str:
     """``on target``, ``slow`` or ``too slow``, so latency never relies on color alone."""
     if seconds is None:
         return ""
-    if seconds < LATENCY_TARGET_SECS:
+    if on_target(seconds):
         return "on target"
     if seconds < LATENCY_TARGET_SECS * SLOW_FACTOR:
         return "slow"

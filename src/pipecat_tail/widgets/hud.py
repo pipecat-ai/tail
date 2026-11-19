@@ -38,7 +38,7 @@ from pipecat_tail.state import (
 )
 from pipecat_tail.widgets import palette
 from pipecat_tail.widgets.graphics import big_number, fit, pad, stacked
-from pipecat_tail.widgets.latency import parts_of, stage_name, turn_bar
+from pipecat_tail.widgets.latency import parts_of, turn_bar
 from pipecat_tail.widgets.render import fmt_elapsed, fmt_latency_digits, fmt_secs, truncate
 
 CAT = "ᓚᘏᗢ"
@@ -398,7 +398,7 @@ class Hud(Widget):
         head = self._target_line(label, scale, bar_w)
         bar = turn_bar(record, scale / bar_w, bar_w)
         items = [
-            Text(stage_name(key), style=Style(color=c))
+            Text(palette.stage_name(key), style=Style(color=c))
             + Text(f" {fmt_secs(secs)}", style=Style(color=p.bright, bold=True))
             for secs, c, key, _ in parts_of(record)
         ]
@@ -432,7 +432,7 @@ class Hud(Widget):
 
     def _stats(self, session: WorkerSession, width: int) -> list[Text]:
         p = palette.current()
-        latencies = [r.latency_secs for r in session.latencies if not r.first_bot_speech]
+        latencies = [r.latency_secs for r in session.answers]
         muted = Style(color=p.muted)
 
         def value(seconds: Optional[float]) -> Text:
@@ -446,7 +446,7 @@ class Hud(Widget):
             first += Text(" · worst ", style=muted) + value(max(latencies) if latencies else None)
 
         if latencies:
-            on_target = sum(1 for s in latencies if s < palette.latency_target())
+            on_target = sum(1 for s in latencies if palette.on_target(s))
             second = Text()
             second.append(f"{on_target}", style=Style(color=p.bright, bold=True))
             second.append(f" of {len(latencies)} answers on target", style=muted)
@@ -494,8 +494,8 @@ class Hud(Widget):
 
 def _last_record(session: WorkerSession) -> Optional[LatencyRecord]:
     """The latest measured answer, preferring turns over the greeting."""
-    record = next((r for r in reversed(session.latencies) if not r.first_bot_speech), None)
-    return record or session.last_latency
+    answers = session.answers
+    return answers[-1] if answers else session.last_latency
 
 
 def _frozen(session: WorkerSession, record: Optional[LatencyRecord]) -> bool:

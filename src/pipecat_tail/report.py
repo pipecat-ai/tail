@@ -41,21 +41,15 @@ def _stages(turn: Turn) -> list[dict[str, Any]]:
     record = turn.latency
     if record is None:
         return []
-    stages = []
-    for c in record.contributions:
-        secs = c.get("duration_secs")
-        if not isinstance(secs, (int, float)) or secs <= 0:
-            continue
-        key = str(c.get("key", "service"))
-        stages.append(
-            {
-                "stage": key,
-                "name": palette.CONTRIBUTION_NAMES.get(key, key.replace("_", " ")),
-                "owner": c.get("owner"),
-                "secs": _round(secs),
-            }
-        )
-    return stages
+    return [
+        {
+            "stage": s.key,
+            "name": palette.stage_name(s.key),
+            "owner": s.owner or None,
+            "secs": _round(s.secs),
+        }
+        for s in record.stages
+    ]
 
 
 def turn_record(turn: Turn) -> dict[str, Any]:
@@ -129,15 +123,13 @@ def _error(error: ErrorRecord) -> dict[str, Any]:
 
 def session_summary(state: SessionState, session: WorkerSession) -> dict[str, Any]:
     """A session in numbers: latency, stages, usage, errors."""
-    records = [r for r in session.latencies if not r.first_bot_speech]
+    records = session.answers
     latencies = [r.latency_secs for r in records]
     target = palette.latency_target()
     stages: dict[str, list[float]] = {}
     for record in records:
-        for c in record.contributions:
-            secs = c.get("duration_secs")
-            if isinstance(secs, (int, float)) and secs > 0:
-                stages.setdefault(str(c.get("key", "service")), []).append(float(secs))
+        for stage in record.stages:
+            stages.setdefault(stage.key, []).append(stage.secs)
     total = sum(sum(v) for v in stages.values()) or 1.0
     turns = [t for t in session.turns if t.has_content]
     last = session.events[-1][0] if session.events else None
@@ -159,7 +151,9 @@ def session_summary(state: SessionState, session: WorkerSession) -> dict[str, An
             "p50": _round(percentile(latencies, 0.5)),
             "p95": _round(percentile(latencies, 0.95)),
             "max": _round(max(latencies)) if latencies else None,
-            "on_target": _round(sum(1 for v in latencies if v < target) / len(latencies), 2)
+            "on_target": _round(
+                sum(1 for v in latencies if palette.on_target(v)) / len(latencies), 2
+            )
             if latencies
             else None,
             "greeting": _round(next((r.latency_secs for r in session.latencies), None))
@@ -168,7 +162,7 @@ def session_summary(state: SessionState, session: WorkerSession) -> dict[str, An
         },
         "stages": {
             key: {
-                "name": palette.CONTRIBUTION_NAMES.get(key, key.replace("_", " ")),
+                "name": palette.stage_name(key),
                 "p50": _round(percentile(values, 0.5)),
                 "p95": _round(percentile(values, 0.95)),
                 "share": _round(sum(values) / total, 3),
