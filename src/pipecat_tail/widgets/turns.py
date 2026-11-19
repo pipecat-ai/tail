@@ -577,7 +577,6 @@ class TurnBlock(Static):
                 highlight=self.view.search_text,
             )
         )
-        self.view.keep_at_end()
 
     def on_resize(self) -> None:
         """Lay the turn out again for its new width."""
@@ -633,7 +632,6 @@ class ConversationView(VerticalScroll):
         self.errors = errors or (lambda: [])
         self.search_text: Optional[str] = None
         self._blocks: dict[int, TurnBlock] = {}
-        self._end_pending = False
         self._room = Static("", classes="room")
         self.border_title = "conversation"
         self.update_legend()
@@ -706,18 +704,17 @@ class ConversationView(VerticalScroll):
             block.redraw()
         if self.search_text or not self.following:
             self.update_legend()
-        self.keep_at_end()
 
-    def keep_at_end(self) -> None:
-        """While following, keep the latest line in view once the turns are laid out.
+    def watch_virtual_size(self) -> None:
+        """Follow once the turns are laid out again.
 
-        Every redraw of a turn calls this, since a turn can grow without a
-        new message: laid out again for its width, a tool call adding a
-        line, the view shown again.
+        Whatever changes what the conversation holds changes its size: a new
+        turn, a turn growing (a tool call's line while the bot thinks, words
+        arriving), a resize rewrapping them. The size is set after layout, so
+        the latest line is measured where it really is, once the scroll range
+        has caught up.
         """
-        if self.following and not self._end_pending:
-            self._end_pending = True
-            self.call_after_refresh(self._follow)
+        self.call_next(self._follow)
 
     def latest_line(self) -> Optional[int]:
         """Where the conversation ends, in the view's scrolled space."""
@@ -725,7 +722,6 @@ class ConversationView(VerticalScroll):
 
     def _follow(self) -> None:
         """Jump only when the latest line would leave the view, putting it in the middle."""
-        self._end_pending = False
         end = self.latest_line()
         height = self.scrollable_content_region.height
         if not self.following or end is None or height <= 0:
@@ -736,7 +732,7 @@ class ConversationView(VerticalScroll):
     def on_resize(self) -> None:
         """Keep half a view of room below the turns, and the latest line in view."""
         self._room.styles.height = max(1, self.scrollable_content_region.height // 2)
-        self.keep_at_end()
+        self.call_after_refresh(self._follow)
 
     def tick(self) -> None:
         """Redraw the turns that animate: the current one and running tool calls."""
@@ -756,7 +752,7 @@ class ConversationView(VerticalScroll):
         """Follow the latest turn, or stay where the view is."""
         self.following = following
         self.update_legend()
-        self.keep_at_end()
+        self.call_after_refresh(self._follow)
 
     def select(self, turn: Optional[Turn], *, top: bool = False) -> None:
         """Select a turn, and scroll it into view (to the top with ``top``)."""
