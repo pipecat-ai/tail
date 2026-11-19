@@ -45,7 +45,6 @@ MAX_LOGS = 5000
 MAX_BUS = 2000
 MAX_SPEECH_EVENTS = 2000
 MAX_METRIC_POINTS = 500
-MAX_LEVELS = 10
 MAX_WAVE = 1500
 MAX_FLOW_HISTORY = 40
 MAX_EVENTS = 6000
@@ -80,9 +79,6 @@ STARTUP: Area = "startup"
 STATUS: Area = "status"
 VOICE: Area = "voice"
 FLOW: Area = "flow"
-
-WAIT_PHASES = ("end of turn", "waiting", "llm", "tool", "first sentence", "tts")
-"""Where a wait for the bot goes, in the order they usually happen."""
 
 LISTENING = "listening"
 THINKING = "thinking"
@@ -237,10 +233,8 @@ class Turn:
     marker: Optional[dict[str, Any]] = None
     context: Optional[dict[str, Any]] = None
     interrupted: bool = False
-    interrupted_at: Optional[float] = None
     latency_secs: Optional[float] = None
     latency: Optional["LatencyRecord"] = None
-    user_stopped_at: Optional[float] = None
     bot_started_at: Optional[float] = None
     ended: bool = False
     duration_secs: Optional[float] = None
@@ -258,7 +252,6 @@ class Turn:
         """Start the turn over from ``timestamp``: nothing before it counts."""
         self.started_at = time.time()
         self.restarted_at = timestamp
-        self.user_stopped_at = None
 
     @property
     def has_bot_content(self) -> bool:
@@ -404,7 +397,6 @@ class FlowStats:
     out_rates: dict[str, float] = field(default_factory=dict)
     in_rates: dict[str, float] = field(default_factory=dict)
     history: Deque[float] = field(default_factory=lambda: deque(maxlen=MAX_FLOW_HISTORY))
-    updated_at: float = 0.0
 
     @property
     def out_total(self) -> float:
@@ -529,7 +521,6 @@ class WorkerSession:
         self.events: Deque[tuple[float, str, dict[str, Any]]] = deque(maxlen=MAX_EVENTS)
         self.user_speaking = False
         self.bot_speaking = False
-        self.user_muted = False
         self.llm_active = False
         self.tts_active = False
         self.waiting_since: Optional[float] = None
@@ -553,8 +544,6 @@ class WorkerSession:
         self.last_bot_stop: Optional[float] = None
         self.user_level = 0.0
         self.bot_level = 0.0
-        self.user_levels: Deque[float] = deque([0.0] * MAX_LEVELS, maxlen=MAX_LEVELS)
-        self.bot_levels: Deque[float] = deque([0.0] * MAX_LEVELS, maxlen=MAX_LEVELS)
         self.user_wave: Deque[tuple[float, float]] = deque(maxlen=MAX_WAVE)
         self.bot_wave: Deque[tuple[float, float]] = deque(maxlen=MAX_WAVE)
         self.started_at: Optional[float] = None
@@ -571,11 +560,6 @@ class WorkerSession:
         self.has_observer_function_calls = False
 
     # State
-
-    @property
-    def bot_state(self) -> str:
-        """What the bot is doing: ``listening``, ``thinking``, ``speaking`` or ``idle``."""
-        return self.bot_state_at(time.time())
 
     def bot_state_at(self, now: float) -> str:
         """What the bot is doing at ``now``, on the bot's clock."""
@@ -700,11 +684,6 @@ class WorkerSession:
         )
         totals.add(record)
 
-    def last_metric(self, processor: str, kind: str = "ttfb") -> Optional[MetricPoint]:
-        """The latest measurement of a service, if any."""
-        series = self.metrics.get((processor, kind))
-        return series[-1] if series else None
-
     # Totals for the strip
 
     @property
@@ -807,7 +786,7 @@ class WorkerSession:
 
         Args:
             timestamp: When the phase started, on the bot's clock.
-            phase: One of ``WAIT_PHASES``.
+            phase: Where the wait got to, such as ``llm`` or ``tts``.
             once: Ignore it if the phase was already reached in this wait.
         """
         if not self.is_waiting(timestamp) or self.wait_started_at is None:
@@ -877,7 +856,6 @@ class SessionState:
         self.errors: list[ErrorRecord] = []
         self.bus: Deque[BusRecord] = deque(maxlen=MAX_BUS)
         self.jobs: dict[str, Job] = {}
-        self.messages_seen = 0
         self.last_message_at: Optional[float] = None
         self.clock_offset: Optional[float] = None
 
@@ -925,11 +903,6 @@ class SessionState:
             index = names.index(self.selected_worker)
             self.selected_worker = names[(index + 1) % len(names)]
         return self.selected_worker
-
-    def select_worker(self, name: Optional[str]) -> None:
-        """Select a worker by name."""
-        if name is None or name in self.sessions:
-            self.selected_worker = name
 
     def set_status(self, status: str, detail: Optional[str] = None) -> set[Area]:
         """Update the connection status."""
@@ -1003,7 +976,6 @@ class SessionState:
         Returns:
             The areas that changed.
         """
-        self.messages_seen += 1
         msg_type = message.get("type")
         if not isinstance(msg_type, str):
             return set()
@@ -1261,8 +1233,6 @@ class SessionState:
             session.ruled_at = timestamp
             session.ruled_turn = turn
             session.bot_spoke_since_ruling = False
-            if turn is not None and not turn.has_bot_content:
-                turn.user_stopped_at = stopped
             heard = session.llm_active or (turn is not None and turn.has_user_content)
             session.speech[-1].heard = heard
             if heard:
@@ -1304,7 +1274,6 @@ class SessionState:
             session.waiting_since = None
             if turn is not None and turn.has_bot_content and not turn.interrupted:
                 turn.interrupted = True
-                turn.interrupted_at = timestamp
 
     def _check_early_end(self, session: WorkerSession, timestamp: float) -> None:
         """Note an early end when the user goes on right after their turn ended."""
@@ -1533,7 +1502,6 @@ class SessionState:
             stats.out_rates = {k: (_number(v) or 0.0) / interval for k, v in out_counts.items()}
             stats.in_rates = {k: (_number(v) or 0.0) / interval for k, v in in_counts.items()}
             stats.history.append(stats.out_total)
-            stats.updated_at = timestamp
             seen.add(str(name))
         # Processors that moved nothing in this interval are idle.
         for name, stats in session.flow.items():
@@ -1629,12 +1597,6 @@ class SessionState:
                 ):
                     self._speech(session, "interruption", timestamp, None)
                 return {CONVERSATION, LATENCY, VOICE, STRIP}
-            case "user-mute-started":
-                session.user_muted = True
-                return {STRIP}
-            case "user-mute-stopped":
-                session.user_muted = False
-                return {STRIP}
             case "bot-llm-started":
                 session.take_up_unheard(timestamp)
                 session.llm_active = True
@@ -1653,13 +1615,11 @@ class SessionState:
             case "user-audio-level":
                 level = _number(data.get("value")) or 0.0
                 session.user_level = level
-                session.user_levels.append(level)
                 session.user_wave.append((timestamp, level))
                 return {STRIP, VOICE}
             case "bot-audio-level":
                 level = _number(data.get("value")) or 0.0
                 session.bot_level = level
-                session.bot_levels.append(level)
                 session.bot_wave.append((timestamp, level))
                 return {STRIP, VOICE}
             case "user-input":
