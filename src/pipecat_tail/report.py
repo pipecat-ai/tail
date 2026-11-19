@@ -204,6 +204,15 @@ def report(state: SessionState) -> dict[str, Any]:
     }
 
 
+def _table(header: list[str], rows: list[list[Any]]) -> list[str]:
+    """A Markdown table, a line each for the header, the rule and every row."""
+
+    def line(cells: list[Any]) -> str:
+        return "| " + " | ".join(str(c) for c in cells) + " |"
+
+    return [line(header), "|" + "---|" * len(header), *(line(row) for row in rows)]
+
+
 def markdown(state: SessionState) -> str:
     """The report as Markdown, to read or paste into an issue."""
     data = report(state)
@@ -222,25 +231,31 @@ def markdown(state: SessionState) -> str:
         ]
         out.append(" · ".join(d for d in details if d))
         out.append("")
-        out.append(
-            f"| p50 | p95 | max | under {fmt_secs(latency['target_secs'])} | early ends | "
-            "interruptions | errors |"
-        )
-        out.append("|---|---|---|---|---|---|---|")
         on_target = latency["on_target"]
-        out.append(
-            f"| {fmt_secs(latency['p50'])} | {fmt_secs(latency['p95'])} | {fmt_secs(latency['max'])} | "
-            f"{f'{on_target:.0%}' if on_target is not None else '—'} | "
-            f"{session['early_ends']} | {session['interruptions']} | {len(session['errors'])} |"
+        out += _table(
+            ["p50", "p95", "max", f"under {fmt_secs(latency['target_secs'])}", "early ends"]
+            + ["interruptions", "errors"],
+            [
+                [
+                    fmt_secs(latency["p50"]),
+                    fmt_secs(latency["p95"]),
+                    fmt_secs(latency["max"]),
+                    f"{on_target:.0%}" if on_target is not None else "—",
+                    session["early_ends"],
+                    session["interruptions"],
+                    len(session["errors"]),
+                ]
+            ],
         )
         if session["stages"]:
-            out += ["", "## Where the time goes", "", "| stage | p50 | p95 | share |"]
-            out.append("|---|---|---|---|")
-            for stage in session["stages"].values():
-                out.append(
-                    f"| {stage['name']} | {fmt_secs(stage['p50'])} | {fmt_secs(stage['p95'])} | "
-                    f"{stage['share']:.0%} |"
-                )
+            out += ["", "## Where the time goes", ""]
+            out += _table(
+                ["stage", "p50", "p95", "share"],
+                [
+                    [s["name"], fmt_secs(s["p50"]), fmt_secs(s["p95"]), f"{s['share']:.0%}"]
+                    for s in session["stages"].values()
+                ],
+            )
         out += ["", "## Turns", ""]
         for turn in session["turns"]:
             head = f"### Turn {turn['turn']}"
