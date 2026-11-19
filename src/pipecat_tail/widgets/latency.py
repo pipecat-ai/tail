@@ -24,7 +24,7 @@ from textual.widgets import Static
 
 from pipecat_tail.state import LatencyRecord, SessionState, WorkerSession, percentile
 from pipecat_tail.widgets import palette
-from pipecat_tail.widgets.graphics import cells, meter, overlay, pack, pad, stacked
+from pipecat_tail.widgets.graphics import Column, Table, meter, overlay, pack, pad, stacked
 from pipecat_tail.widgets.render import fmt_secs
 from pipecat_tail.widgets.voice import timeline_end
 
@@ -248,32 +248,19 @@ def stage_table(session: WorkerSession, width: int = 120) -> Group | Text:
             "which the setup file turns on.",
             style=Style(color=p.muted),
         )
-    order = ["stage", "p50", "share", "p95", "bar", "set by"]
-    widths = {c: max(len(c), *(r[c].cell_len for r in rows)) for c in order}
-    widths["set by"] = max(len("set by"), 12)
-    columns: list[str] = []
-    used = 0
-    for column in order:
-        need = widths[column] + (2 if columns else 0)
-        if columns and used + need > width:
-            break
-        columns.append(column)
-        used += need
-    shown = [c for c in order if c in columns]
-
-    def line(row: dict[str, Text]) -> Text:
-        parts = []
-        for column in shown:
-            last = column == "set by"
-            justify = "right" if column in ("p50", "p95", "share") else "left"
-            parts.append((row[column], 0 if last else widths[column], justify))
-        out = cells(parts)
-        if out.cell_len > width:
-            out.truncate(width, overflow="ellipsis")
-        return out
-
-    header = {c: Text("" if c == "bar" else c, style=Style(color=p.muted)) for c in shown}
-    return Group(line(header), *(line(row) for row in rows))
+    table = Table(
+        [
+            Column("stage"),
+            Column("p50", right=True),
+            Column("share", right=True),
+            Column("p95", right=True),
+            Column("bar", title=""),
+            Column("set by", free=True, min_width=12, max_width=12),
+        ],
+        rows,
+        width,
+    )
+    return Group(table.header(Style(color=p.muted)), *(table.line(row) for row in rows))
 
 
 def histogram(session: WorkerSession, width: int, height: int = 5) -> Group | Text:

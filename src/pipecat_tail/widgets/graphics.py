@@ -15,6 +15,7 @@ import base64
 import binascii
 import functools
 import math
+from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
 from rich.style import Style
@@ -107,6 +108,100 @@ def cells(row: Sequence[tuple[Text, int, str]], gap: int = 2) -> Text:
             line.append_text(cell)
             line.append(" " * room)
     return line
+
+
+@dataclass(frozen=True)
+class Column:
+    """A column of a ``Table``: how its cells line up, and what gives way when short of room.
+
+    Args:
+        key: The key of its cells in each row.
+        title: Its header, the key when not given.
+        right: Line the cells up on the right, as numbers are.
+        optional: Leave it out when it doesn't fit, and go on with the next
+            columns, instead of ending the table there.
+        free: Take whatever room is left when it's the last column shown.
+        shrink: Give up width, down to ``min_width``, to fit; cells keep their end.
+        min_width: The narrowest it gets.
+        max_width: The widest it gets, when not zero.
+    """
+
+    key: str
+    title: Optional[str] = None
+    right: bool = False
+    optional: bool = False
+    free: bool = False
+    shrink: bool = False
+    min_width: int = 0
+    max_width: int = 0
+
+
+class Table:
+    """Rows of cells in columns, as many columns as fit, in order of importance.
+
+    The first column always shows. Every column is as wide as its widest
+    cell or title, and two spaces apart; ``indent`` leaves room on the left.
+    A number is never cut: a column that doesn't fit is left out.
+    """
+
+    GAP = 2
+
+    def __init__(
+        self,
+        columns: Sequence[Column],
+        rows: Sequence[dict[str, Text]],
+        width: int,
+        indent: int = 0,
+    ):
+        """Fit the columns to ``width``."""
+        self.width = width
+        self.indent = indent
+        self.widths: dict[str, int] = {}
+        for column in columns:
+            cells = [len(column.title if column.title is not None else column.key)]
+            cells += [row[column.key].cell_len for row in rows]
+            widest = max(cells)
+            if column.max_width:
+                widest = min(widest, column.max_width)
+            self.widths[column.key] = max(column.min_width, widest)
+        self.columns: list[Column] = []
+        used = indent
+        for column in columns:
+            gap = self.GAP if (self.columns or indent) else 0
+            need = self.widths[column.key] + gap
+            if column.shrink and used + need > width:
+                self.widths[column.key] = max(column.min_width, width - used - gap)
+                need = self.widths[column.key] + gap
+            if self.columns and used + need > width:
+                if column.optional:
+                    continue
+                break
+            self.columns.append(column)
+            used += need
+
+    def line(self, row: dict[str, Text]) -> Text:
+        """One row, cut to the width if a free last column runs long."""
+        parts = [(Text(""), self.indent, "left")] if self.indent else []
+        for column in self.columns:
+            cell = row[column.key]
+            width = self.widths[column.key]
+            if column.shrink and cell.cell_len > width:
+                cell = cell[-width:]
+            if column.free and column is self.columns[-1]:
+                width = 0
+            parts.append((cell, width, "right" if column.right else "left"))
+        out = cells(parts, gap=self.GAP)
+        if out.cell_len > self.width:
+            out.truncate(self.width, overflow="ellipsis")
+        return out
+
+    def header(self, style: Style) -> Text:
+        """The titles of the columns shown."""
+        titles = {
+            c.key: Text(c.title if c.title is not None else c.key, style=style)
+            for c in self.columns
+        }
+        return self.line(titles)
 
 
 def pack(items: Sequence[Text], width: int, sep: str = "   ", indent: int = 0) -> list[Text]:

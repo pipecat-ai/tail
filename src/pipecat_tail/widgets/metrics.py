@@ -21,7 +21,7 @@ from textual.widgets import Static
 
 from pipecat_tail.state import WorkerSession, percentile
 from pipecat_tail.widgets import palette
-from pipecat_tail.widgets.graphics import cells, pack, sparkline
+from pipecat_tail.widgets.graphics import Column, Table, pack, sparkline
 from pipecat_tail.widgets.render import (
     bar,
     fmt_int,
@@ -100,44 +100,24 @@ def latency_rows(session: WorkerSession, width: int) -> Group | Text:
     if not rows:
         # Only processing times too small to show so far.
         return Text("No service measurements yet.", style=Style(color=p.muted))
-    order = ["metric", "last", "recent", "median", "worst", "n", "note"]
-    widths = {c: max(len(c), *(r[c].cell_len for _, r in rows)) for c in order}
-    # As wide as the measurements so far, up to the window.
-    widths["recent"] = max(8, min(SPARK_POINTS, max(r["recent"].cell_len for _, r in rows)))
-    shown: list[str] = []
-    used = 1  # the indent; every column then takes its width and a gap of 2
-    for column in order:
-        need = widths[column] + 2
-        if column == "recent" and used + need > width:
-            # A shorter sparkline beats none.
-            widths["recent"] = max(8, width - used - 2)
-            need = widths["recent"] + 2
-        if used + need > width:
-            if column in ("recent", "note"):
-                continue
-            break
-        shown.append(column)
-        used += need
-    shown = [c for c in order if c in shown]
-
-    def justify(column: str) -> str:
-        return "right" if column in ("last", "median", "worst", "n") else "left"
-
-    def line(row: dict[str, Text]) -> Text:
-        parts = [(Text(""), 1, "left")]
-        for column in shown:
-            cell = row[column]
-            if column == "recent" and cell.cell_len > widths["recent"]:
-                cell = cell[-widths["recent"] :]
-            last = column == shown[-1] and column == "note"
-            parts.append((cell, 0 if last else widths[column], justify(column)))
-        out = cells(parts)
-        if out.cell_len > width:
-            out.truncate(width, overflow="ellipsis")
-        return out
-
-    header = {c: Text("" if c == "note" else c, style=Style(color=p.muted)) for c in shown}
-    blocks: list[Any] = [line(header)]
+    table = Table(
+        [
+            Column("metric"),
+            Column("last", right=True),
+            # As wide as the measurements so far, up to the window; a shorter
+            # sparkline beats none.
+            Column("recent", optional=True, shrink=True, min_width=8, max_width=SPARK_POINTS),
+            Column("median", right=True),
+            Column("worst", right=True),
+            Column("n", right=True),
+            Column("note", title="", optional=True, free=True),
+        ],
+        [row for _, row in rows],
+        width,
+        indent=1,
+    )
+    line = table.line
+    blocks: list[Any] = [table.header(Style(color=p.muted))]
     for processor in dict.fromkeys(proc for proc, _ in rows):
         color = palette.processor_color(processor)
         name = Text("◆ ", style=Style(color=color))
