@@ -270,7 +270,7 @@ HELP = (
             ),
             ("↑ ↓", "select a turn in Live and Latency"),
             ("w", "next worker, when the runner has several bots"),
-            ("e", "next error"),
+            ("e", "the latest error, in the logs"),
             ("s", "save a report of the session, JSON and Markdown, here"),
             ("x", "dismiss the error banner"),
             ("t", "next theme"),
@@ -292,6 +292,7 @@ HELP = (
         (
             ("/", "search with a regular expression"),
             ("l", "minimum level"),
+            ("n p", "select the next or previous error"),
             ("f", "follow, or pause"),
         ),
     ),

@@ -48,6 +48,10 @@ _LEVEL_ROLES = {
 }
 
 
+ERROR_LEVELS = ("ERROR", "CRITICAL")
+"""The levels ``n`` and ``p`` step through."""
+
+
 def level_style(level: str) -> Style:
     """The style a log level is shown in, in the current palette."""
     role = _LEVEL_ROLES.get(level, "text")
@@ -89,6 +93,7 @@ class LogsView(Vertical):
         self.level_index = 0
         self.pattern: Optional[re.Pattern] = None
         self.following = True
+        self.selected: Optional[LogRecord] = None
         self._shown = 0
         self._state: Optional[SessionState] = None
         self._compact = False
@@ -131,13 +136,54 @@ class LogsView(Vertical):
         return None
 
     def toggle_follow(self) -> bool:
-        """Toggle auto-scroll and return the new setting."""
+        """Toggle auto-scroll and return the new setting. Following lets go of a selected line."""
         self.following = not self.following
         self.lines.auto_scroll = self.following
         if self.following:
+            if self.selected is not None:
+                self.selected = None
+                self.rebuild()
             self.lines.scroll_end(animate=False)
         self._update_title()
         return self.following
+
+    def errors(self) -> list[LogRecord]:
+        """The error lines shown, oldest first."""
+        if self._state is None:
+            return []
+        records = list(self._state.logs)[-MAX_LINES:]
+        return [r for r in records if r.level.upper() in ERROR_LEVELS and self.accepts(r)]
+
+    def jump(self, step: int) -> Optional[LogRecord]:
+        """Select the next (1) or previous (-1) error line, wrapping around.
+
+        With nothing selected, it's the first or the last one.
+        """
+        errors = self.errors()
+        if not errors:
+            return None
+        at = next((i for i, record in enumerate(errors) if record is self.selected), None)
+        if at is None:
+            index = 0 if step > 0 else len(errors) - 1
+        else:
+            index = (at + step) % len(errors)
+        self.select(errors[index])
+        return errors[index]
+
+    def select_latest_error(self) -> Optional[LogRecord]:
+        """Select the most recent error line, if there is one."""
+        errors = self.errors()
+        if errors:
+            self.select(errors[-1])
+        return errors[-1] if errors else None
+
+    def select(self, record: LogRecord) -> None:
+        """Select a line and pause following, so it stays where it is."""
+        self.selected = record
+        self.following = False
+        self.lines.auto_scroll = False
+        # Drawn once the view has its size, as it does when just shown.
+        self.call_after_refresh(self.rebuild)
 
     def open_search(self) -> None:
         """Show and focus the search box."""
@@ -178,8 +224,15 @@ class LogsView(Vertical):
         if self._state is None:
             self._update_title()
             return
+        selected_at = None
         for record in list(self._state.logs)[-MAX_LINES:]:
-            self._write(record)
+            at = self._write(record)
+            if record is self.selected:
+                selected_at = at
+        if selected_at is not None:
+            # The selected line goes in the middle, with what led to it above.
+            middle = max(0, selected_at - self.lines.scrollable_content_region.height // 2)
+            self.call_after_refresh(self.lines.scroll_to, y=middle, animate=False)
         self._update_title()
         self.refresh_pinned()
 
@@ -196,16 +249,27 @@ class LogsView(Vertical):
             self._compact = compact
             self.rebuild()
 
-    def _write(self, record: LogRecord) -> None:
+    def _write(self, record: LogRecord) -> Optional[int]:
+        """Write a record if it passes the filters, and return the line it starts on."""
         if not self.accepts(record):
-            return
+            return None
         self._shown += 1
+        at = len(self.lines.lines)
+        # The scrollbar takes two columns of the content region.
+        width = max(20, self.lines.scrollable_content_region.width - 2)
+        selected = Style(bgcolor=palette.current().sel) if record is self.selected else None
         if self._compact:
-            # The scrollbar takes two columns of the content region.
-            width = max(20, self.lines.scrollable_content_region.width - 2)
-            self.lines.write(self._compact_line(record), width=width, expand=True)
+            line = self._compact_line(record)
+            if selected:
+                line.style = selected
+            self.lines.write(line, width=width, expand=True)
         else:
-            self.lines.write(self._line(record))
+            text = self._line(record)
+            if selected:
+                text.pad_right(max(0, width - text.cell_len))
+                text.stylize(selected)
+            self.lines.write(text)
+        return at
 
     def _message(self, record: LogRecord) -> Text:
         level = record.level.upper()
@@ -254,9 +318,22 @@ class LogsView(Vertical):
         if self.pattern:
             # Only matching records are shown while searching.
             pieces.append(f"/{self.pattern.pattern}/ {self._shown} matches")
-        if not self.following:
+        position = self._position()
+        if position:
+            pieces.append(position)
+        elif not self.following:
             pieces.append("paused")
         self.lines.border_title = " · ".join(pieces)
+
+    def _position(self) -> Optional[str]:
+        """Which error the selected line is, as ``error 2 of 5``."""
+        if self.selected is None:
+            return None
+        errors = self.errors()
+        for index, record in enumerate(errors):
+            if record is self.selected:
+                return f"error {index + 1} of {len(errors)}"
+        return None
 
     def refresh_pinned(self) -> None:
         """Re-render the pinned errors line."""

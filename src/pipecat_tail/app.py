@@ -212,7 +212,7 @@ class TailApp(App):
         Binding("slash", "search", "Search", show=False),
         Binding("l", "level", "Level", show=False),
         Binding("b", "bus_filter", "Bus filter", show=False),
-        Binding("e", "next_error", "Error", show=False),
+        Binding("e", "latest_error", "Error", show=False),
         Binding("x", "dismiss_error", "Dismiss", show=False),
         Binding("w", "next_worker", "Worker", show=False),
         Binding("t", "next_theme", "Theme", show=False),
@@ -252,7 +252,6 @@ class TailApp(App):
         self._dirty: set[str] = set()
         self._new_bus: list = []
         self._new_logs: list = []
-        self._error_cursor = -1
         self._last_slow_tick = 0.0
         self._last_frame: dict[str, float] = {}
         self.view = "live"
@@ -540,7 +539,12 @@ class TailApp(App):
         self._show_following()
 
     def action_jump(self, step: int) -> None:
-        """Jump to the next or previous issue, or search match during a search."""
+        """Jump to the next or previous issue (a match while searching), or error in the logs."""
+        if self.view == "logs":
+            if self.logs_view.jump(step) is None:
+                self.notify("No errors shown", timeout=1.5)
+            self._show_following()
+            return
         if self.view != "live":
             return
         conversation = self.live.conversation
@@ -623,22 +627,12 @@ class TailApp(App):
         name = self.pipeline_view.bus.cycle_filter(self.state)
         self.notify(f"Bus filter: {name}", timeout=1.5)
 
-    def action_next_error(self) -> None:
-        """Jump to the logs and show the next error."""
-        errors = self.state.errors
-        if not errors:
-            self.notify("No errors", timeout=1.5)
-            return
-        self._error_cursor = (self._error_cursor + 1) % len(errors)
-        error = errors[self._error_cursor]
+    def action_latest_error(self) -> None:
+        """Show the latest error in the logs: n and p go on from there."""
         self.action_show_view("logs")
-        self.logs_view.refresh_pinned()
-        self.notify(
-            f"{error.processor}: {error.message}",
-            title=f"Error {self._error_cursor + 1} of {len(errors)} · {error.category}",
-            severity="error",
-            timeout=6,
-        )
+        if self.logs_view.select_latest_error() is None:
+            self.notify("No errors shown", timeout=1.5)
+        self._show_following()
 
     def action_dismiss_error(self) -> None:
         """Hide the error banner."""

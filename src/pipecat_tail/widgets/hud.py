@@ -607,7 +607,7 @@ class KeyBar(Widget):
         "latency": (("↑↓", "turns"), ("⏎", "inspect")),
         "pipeline": (("b", "bus filter"),),
         "metrics": (),
-        "logs": (("/", "search"), ("l", "level"), ("e", "next error"), ("f", "follow")),
+        "logs": (("/", "search"), ("l", "level"), ("n/p", "errors"), ("f", "follow")),
     }
 
     def __init__(self):

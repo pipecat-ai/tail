@@ -321,6 +321,44 @@ async def test_logs_workers_and_startup_follow_the_theme():
 
 
 @pytest.mark.asyncio
+async def test_logs_step_through_errors():
+    app = TailApp()
+    async with app.run_test(size=(150, 46)) as pilot:
+        await feed(app, pilot)
+        logs = app.logs_view
+
+        def on_screen(text: str) -> bool:
+            top = int(logs.lines.scroll_y)
+            visible = logs.lines.lines[top : top + logs.lines.size.height]
+            return any(text in line.text for line in visible)
+
+        # e, from anywhere, selects the latest error in the logs.
+        await pilot.press("e")
+        await pilot.pause(0.3)
+        assert app.view == "logs" and not logs.following
+        errors = logs.errors()
+        assert errors and logs.selected is errors[-1]
+        assert logs.lines.border_title.endswith(f"error {len(errors)} of {len(errors)}")
+        assert await settled(pilot, lambda: on_screen(errors[-1].message))
+        assert "n/p  errors" in rendered(app.key_bar)
+
+        # n and p step through them, wrapping around.
+        await pilot.press("n")
+        await pilot.pause(0.3)
+        assert logs.selected is errors[0]
+        assert "error 1 of" in logs.lines.border_title
+        await pilot.press("p")
+        await pilot.pause(0.3)
+        assert logs.selected is errors[-1]
+
+        # f follows again and lets go of the line.
+        await pilot.press("f")
+        await pilot.pause(0.2)
+        assert logs.following and logs.selected is None
+        assert "error" not in logs.lines.border_title
+
+
+@pytest.mark.asyncio
 async def test_layout_fits_small_terminals():
     app = TailApp()
     async with app.run_test(size=(80, 24)) as pilot:

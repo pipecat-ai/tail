@@ -723,3 +723,22 @@ def test_a_wait_the_bot_never_answers_ends_however_it_is_read():
     assert not session.is_active(later)
     assert session.bot_state_at(later) == LISTENING
     assert not session.is_active(later)
+
+
+def test_a_processor_error_is_also_a_line_of_the_logs():
+    # Pipecat logs a processor's error as a warning, if at all.
+    state = SessionState()
+    state.apply(
+        tail(
+            "tail-error",
+            {
+                "message": "connection lost",
+                "category": "connectivity",
+                "processor": "DailyOutputTransport#0",
+                "timestamp": 1_000_000.0,
+            },
+        )
+    )
+    (line,) = state.logs
+    assert line.level == "ERROR" and line.name == "DailyOutputTransport#0"
+    assert line.message == "connectivity: connection lost" and line.worker == "bot-1"

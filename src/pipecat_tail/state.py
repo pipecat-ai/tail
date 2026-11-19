@@ -445,6 +445,20 @@ class ErrorRecord:
     exception_type: Optional[str] = None
     dismissed: bool = False
 
+    def as_log(self) -> "LogRecord":
+        """The error as a line of the logs."""
+        when = datetime.datetime.fromtimestamp(self.timestamp).astimezone()
+        return LogRecord(
+            time=when.isoformat(),
+            level="ERROR",
+            name=self.processor,
+            function=self.category,
+            line="",
+            message=f"{self.category}: {self.message}",
+            worker=self.worker,
+            exception=self.exception_type,
+        )
+
 
 @dataclass
 class BusRecord:
@@ -1090,17 +1104,19 @@ class SessionState:
                 self.session(worker).transport_timing = dict(data)
                 return {STARTUP}
             case "tail-error":
-                self.errors.append(
-                    ErrorRecord(
-                        message=str(data.get("message", "")),
-                        category=str(data.get("category", "unknown")),
-                        processor=str(data.get("processor", "?")),
-                        processor_usable=bool(data.get("processor_usable", True)),
-                        timestamp=_number(data.get("timestamp")) or timestamp,
-                        worker=worker,
-                        exception_type=data.get("exception_type"),
-                    )
+                error = ErrorRecord(
+                    message=str(data.get("message", "")),
+                    category=str(data.get("category", "unknown")),
+                    processor=str(data.get("processor", "?")),
+                    processor_usable=bool(data.get("processor_usable", True)),
+                    timestamp=_number(data.get("timestamp")) or timestamp,
+                    worker=worker,
+                    exception_type=data.get("exception_type"),
                 )
+                self.errors.append(error)
+                # Pipecat logs a processor's error as a warning, if at all: the
+                # logs show it as the error it is.
+                self.logs.append(error.as_log())
                 return {ERRORS, LOGS, STRIP, FLOW}
             case "tail-function-call":
                 self.session(worker).has_observer_function_calls = True

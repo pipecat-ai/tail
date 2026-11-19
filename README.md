@@ -66,7 +66,7 @@ Below the top are five views. The key line at the bottom lists the current view'
 - Anywhere: `1`–`5` switch views, `?` shows help (starting with what each mark on the screen means), `x` dismisses the error banner, `s` saves a report, `w` switches worker, `t` switches theme, `c` reconnects, `q` quits.
 - Turns, in Live and Latency: `↑` `↓` select a turn, `⏎` inspects it.
 - Live: `n` `p` jump to the next or previous issue, `/` searches what was said, `esc` ends the search, `f` follows or pauses, `+` `-` zoom the voice timeline.
-- Logs: `/` searches, `l` cycles the level, `e` jumps to the next error, `f` follows or pauses.
+- Logs: `n` `p` select the next or previous error, `/` searches, `l` cycles the level, `f` follows or pauses. `e`, anywhere, shows the latest error here.
 - Pipeline: `b` cycles the bus filter.
 
 ## Getting started
