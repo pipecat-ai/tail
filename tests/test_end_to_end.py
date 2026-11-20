@@ -391,10 +391,10 @@ async def test_worker_runner_with_a_tail_worker_serving_the_app():
 
 
 class FakeAppProcess:
-    """Stands in for the app process: reads the queue in ``join()``.
+    """Stands in for ``pipecat tail``: connects and reads in ``wait()``.
 
     Args:
-        queue: The app's queue.
+        url: The dashboard's server.
         received: Collects the messages read.
         until: ``"pipeline"`` quits once ``pipelines`` pipelines have
             finished, as a user would; ``"started"`` quits as soon as a
@@ -403,48 +403,52 @@ class FakeAppProcess:
         pipelines: How many pipelines finish before a ``"pipeline"`` app quits.
     """
 
-    def __init__(self, queue, received, until, pipelines: int = 1):
-        self._queue = queue
+    def __init__(self, url: str, received, until, pipelines: int = 1):
+        self._url = url
         self._received = received
         self._until = until
         self._pipelines = pipelines
-        self.markers: list = []
+        self.ended = False
         self.terminated = False
 
-    def join(self):
-        while True:
-            message = self._queue.get()
-            if isinstance(message, dict):
-                self._received.append(message)
-                if self._until == "started" and message["type"] == "tail-pipeline-started":
-                    return
-                if self._until == "pipeline" and message["type"] == "tail-pipeline-finished":
-                    self._pipelines -= 1
-                    if not self._pipelines:
+    def wait(self):
+        asyncio.run(self._read())
+
+    async def _read(self):
+        try:
+            async with websockets.connect(self._url) as client:
+                async for raw in client:
+                    message = json.loads(raw)
+                    self._received.append(message)
+                    if self._until == "started" and message["type"] == "tail-pipeline-started":
                         return
-                continue
-            self.markers.append(message)
-            return
+                    if self._until == "pipeline" and message["type"] == "tail-pipeline-finished":
+                        self._pipelines -= 1
+                        if not self._pipelines:
+                            return
+        except websockets.ConnectionClosed:
+            pass
+        self.ended = True
 
     def terminate(self):
         self.terminated = True
 
 
 def fresh_dashboard(monkeypatch, start_app):
-    """A dashboard of its own for a test, whose app is ``start_app(queue)``."""
+    """A dashboard of its own for a test, whose app is ``start_app(url)``."""
     from pipecat_tail import dashboard
 
     monkeypatch.setattr(dashboard, "DASHBOARD", dashboard._Dashboard())
-    monkeypatch.setattr(dashboard._Dashboard, "start_app", lambda self, queue: start_app(queue))
+    monkeypatch.setattr(dashboard._Dashboard, "start_app", lambda self, url: start_app(url))
 
 
 @needs_workers
 @pytest.mark.asyncio
 async def test_tail_worker_feeds_the_app_here(monkeypatch):
-    """TailWorker attaches observers and feeds the app process through a queue.
+    """TailWorker attaches observers and feeds the app here through a local server.
 
-    The Textual app needs a terminal, so the app process is replaced by a
-    reader that drains the queue until the pipeline is over.
+    The Textual app needs a terminal, so ``pipecat tail`` is replaced by a
+    client that reads until the pipeline is over.
     """
     from pipecat.pipeline.worker import PipelineWorker
 
@@ -454,7 +458,7 @@ async def test_tail_worker_feeds_the_app_here(monkeypatch):
     lines: list[str] = []
     sink = logger.add(lambda line: lines.append(str(line)), level="INFO")
     received: list[dict] = []
-    fresh_dashboard(monkeypatch, lambda queue: FakeAppProcess(queue, received, "pipeline"))
+    fresh_dashboard(monkeypatch, lambda url: FakeAppProcess(url, received, "pipeline"))
 
     processor = FakeLLM(name="proc")
     worker = PipelineWorker(
@@ -482,7 +486,7 @@ async def test_tail_worker_feeds_the_app_here(monkeypatch):
     assert any("after the run" in line for line in lines)
 
     types = [m["type"] for m in received]
-    # No client connects to a queue: the server says it is ready as it starts,
+    # The worker says it is ready as it starts, not when the app connects,
     # or the app would show the bot as disconnected and its state pills off.
     ready = next(m for m in received if m["type"] == "tail-ready")
     if hasattr(tail, "worker_runner"):
@@ -510,14 +514,13 @@ async def test_tail_worker_closes_the_app_when_the_runner_is_cancelled(monkeypat
     """
     from pipecat.pipeline.worker import PipelineWorker
 
-    from pipecat_tail.dashboard import QUIT
     from pipecat_tail.worker import TailWorker
 
     logger.remove()
     apps: list[FakeAppProcess] = []
 
-    def start_app(queue):
-        apps.append(FakeAppProcess(queue, [], "quit"))
+    def start_app(url):
+        apps.append(FakeAppProcess(url, [], "quit"))
         return apps[-1]
 
     fresh_dashboard(monkeypatch, start_app)
@@ -533,7 +536,8 @@ async def test_tail_worker_closes_the_app_when_the_runner_is_cancelled(monkeypat
     logger.add(lambda _: None)
 
     assert worker.has_finished()
-    assert apps[0].markers == [QUIT]
+    # The app saw its connection end and quit by itself.
+    assert apps[0].ended
     assert not apps[0].terminated
 
 
@@ -546,7 +550,7 @@ async def test_closing_the_app_here_stops_the_bot(monkeypatch):
     from pipecat_tail.worker import TailWorker
 
     logger.remove()
-    fresh_dashboard(monkeypatch, lambda queue: FakeAppProcess(queue, [], "started"))
+    fresh_dashboard(monkeypatch, lambda url: FakeAppProcess(url, [], "started"))
     worker = PipelineWorker(Pipeline([FakeLLM(name="proc")]), name="bot-8", idle_timeout_secs=None)
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(worker, TailWorker(worker))
@@ -561,7 +565,7 @@ async def test_tail_workers_in_one_process_share_one_app(monkeypatch):
     """A development runner starts the bot, and its runner, for every call.
 
     The calls report to the app already open, instead of starting another
-    on the same terminal.
+    on the same terminal, and the process's logs reach it once.
     """
     from pipecat.pipeline.worker import PipelineWorker
 
@@ -571,8 +575,8 @@ async def test_tail_workers_in_one_process_share_one_app(monkeypatch):
     apps: list[FakeAppProcess] = []
     received: list[dict] = []
 
-    def start_app(queue):
-        apps.append(FakeAppProcess(queue, received, "pipeline", pipelines=2))
+    def start_app(url):
+        apps.append(FakeAppProcess(url, received, "pipeline", pipelines=2))
         return apps[-1]
 
     fresh_dashboard(monkeypatch, start_app)
@@ -594,12 +598,15 @@ async def test_tail_workers_in_one_process_share_one_app(monkeypatch):
     # The first call is over, and its dashboard stays open for the next one.
     assert not first.done()
     second = await call("call-2")
+    logger.info("both calls have a Tail worker")
     await asyncio.wait_for(asyncio.gather(first, second), 15.0)
     logger.add(lambda _: None)
 
     assert len(apps) == 1
     started = [m["worker"] for m in received if m["type"] == "tail-pipeline-started"]
     assert started == ["call-1", "call-2"]
+    logs = [m["data"]["message"] for m in received if m["type"] == "tail-log"]
+    assert logs.count("both calls have a Tail worker") == 1
 
 
 def test_audio_level_follows_loudness():

@@ -249,10 +249,12 @@ class TailWorker(BaseWorker):
     async def start(self) -> None:
         """Start the worker, and the app here or its server."""
         await super().start()
-        self._logger_id = forward_logs(self._send, self._log_level)
         if self._here:
-            self._app_closed = dashboard.DASHBOARD.open()
+            # The app here is the process's, and so are the logs it gets.
+            self._app_closed = dashboard.DASHBOARD.open(self._log_level)
             self._closing_task = asyncio.create_task(self._stop_bots_when_closed())
+        else:
+            self._logger_id = forward_logs(self._send, self._log_level)
         if self._server:
             try:
                 await self._server.start()

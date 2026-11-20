@@ -4,56 +4,48 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import threading
-import time
-from multiprocessing import Queue
+import asyncio
+import os
+import socket
+import sys
 
 import pytest
 
-from pipecat_tail import compat
 
-pytestmark = pytest.mark.skipif(
-    not compat.HAS_WORKERS, reason="the app here comes with TailWorker, Pipecat 1.3+"
-)
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc")
+@pytest.mark.asyncio
+async def test_the_app_is_pipecat_tail_in_a_process_of_its_own(monkeypatch):
+    """Not a fork of the bot: it holds none of the bot's sockets, its port
+    among them, and it quits once its connection ends."""
+    from pipecat_tail.dashboard import _Dashboard
+    from pipecat_tail.sink import TailWebSocketServer
 
-
-def start_app(queue):
-    """Run the app the way the app process does, headless, in a thread."""
-    from pipecat_tail.dashboard import TailAppProcess
-
-    process = TailAppProcess(queue, headless=True)
-    finished = threading.Event()
-
-    def run():
-        process.run_app()
-        finished.set()
-
-    threading.Thread(target=run, daemon=True).start()
-    end = time.monotonic() + 10
-    while process._reader_task is None and time.monotonic() < end:
-        time.sleep(0.05)
-    assert process._reader_task is not None, "the app did not start"
-    return process, finished
-
-
-def test_app_exits_while_its_queue_is_idle():
-    # Quitting after the pipeline has stopped sending used to hang: the
-    # queue read kept the app's event loop from closing.
-    queue = Queue()
-    process, finished = start_app(queue)
-    queue.put({"type": "tail-ready"})
-    time.sleep(0.2)
-    process._app.call_from_thread(process._app.exit)
-    assert finished.wait(10), "the app did not exit"
-
-
-def test_quit_message_closes_the_app():
-    from pipecat_tail.dashboard import QUIT
-
-    queue = Queue()
-    _, finished = start_app(queue)
-    queue.put(QUIT)
-    assert finished.wait(10), "the app did not exit"
+    monkeypatch.setenv("TEXTUAL_DRIVER", "textual.drivers.headless_driver:HeadlessDriver")
+    bot_port = socket.socket()
+    bot_port.bind(("127.0.0.1", 0))
+    bot_port.listen()
+    server = TailWebSocketServer(host="127.0.0.1", port=0)
+    await server.start()
+    process = _Dashboard().start_app(server.url)
+    try:
+        held = [
+            os.readlink(f"/proc/{process.pid}/fd/{fd}")
+            for fd in os.listdir(f"/proc/{process.pid}/fd")
+        ]
+        assert not [link for link in held if link.startswith("socket:")]
+        await server.emit({"label": "tail", "type": "tail-ready", "data": {}})
+        for _ in range(300):
+            if server._client is not None:
+                break
+            await asyncio.sleep(0.1)
+        assert server._client is not None, "pipecat tail did not connect"
+        await server.stop()
+        assert await asyncio.to_thread(process.wait, 30) == 0
+    finally:
+        if process.poll() is None:
+            process.kill()
+        await server.stop()
+        bot_port.close()
 
 
 def test_terminal_output_is_hidden_while_the_app_draws(monkeypatch, capfd):

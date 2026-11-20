@@ -75,7 +75,7 @@ class TailWebSocketServer:
 
         Args:
             host: Address to bind to.
-            port: Port to bind to.
+            port: Port to bind to; 0 takes a free one.
             buffer_size: How many messages to keep for a client that connects
                 late. The oldest messages are dropped first.
             on_client_connected: Called after the buffered messages have been
@@ -105,6 +105,8 @@ class TailWebSocketServer:
         self._send_queue = asyncio.Queue()
         self._send_task = asyncio.create_task(self._send_task_handler())
         self._server = await serve(self._client_handler, self._host, self._port)
+        if not self._port:
+            self._port = list(self._server.sockets)[0].getsockname()[1]
         logger.debug(f"ᓚᘏᗢ Tail running at {self.url}")
 
     async def stop(self) -> None:

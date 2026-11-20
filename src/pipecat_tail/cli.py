@@ -32,14 +32,23 @@ DEFAULT_URL = "ws://localhost:9292"
 class PipecatTail:
     """Standalone Tail application driven by a websocket connection."""
 
-    def __init__(self, *, url: str = DEFAULT_URL, report_path: Optional[Path] = None):
+    def __init__(
+        self,
+        *,
+        url: str = DEFAULT_URL,
+        report_path: Optional[Path] = None,
+        exit_on_disconnect: bool = False,
+    ):
         """Initialize the application.
 
         Args:
             url: Tail server URL.
             report_path: Where to write a report of the session on quit.
+            exit_on_disconnect: Quit when the connection ends, instead of
+                waiting for the bot to come back.
         """
         self._url = url
+        self._exit_on_disconnect = exit_on_disconnect
         self._app = TailApp(
             on_mount=self._on_mount,
             on_shutdown=self._on_shutdown,
@@ -48,7 +57,7 @@ class PipecatTail:
             report_path=report_path,
         )
         self._client = TailClient(
-            url, on_message=self._app.handle_message, on_status=self._app.handle_status
+            url, on_message=self._app.handle_message, on_status=self._on_status
         )
 
     async def run(self) -> None:
@@ -66,6 +75,11 @@ class PipecatTail:
 
     async def _on_connect(self) -> None:
         self._client.reconnect_now()
+
+    async def _on_status(self, status: str, detail: Optional[str] = None) -> None:
+        await self._app.handle_status(status, detail)
+        if self._exit_on_disconnect and status in ("disconnected", "error"):
+            self._app.exit()
 
 
 class PipecatTailDemo:
@@ -152,6 +166,11 @@ def cli(
         "--report",
         help="Write a report of the session here on exit: Markdown for .md, JSON otherwise",
     ),
+    exit_on_disconnect: bool = typer.Option(
+        False,
+        "--exit-on-disconnect",
+        help="Quit when the connection to the bot ends, instead of waiting for it to come back",
+    ),
 ):
     """Pipecat Tail command."""
     if ctx.invoked_subcommand is not None:
@@ -171,7 +190,11 @@ def cli(
         except KeyboardInterrupt:
             pass
         return
-    app = PipecatTailDemo() if demo else PipecatTail(url=url, report_path=report)
+    app = (
+        PipecatTailDemo()
+        if demo
+        else PipecatTail(url=url, report_path=report, exit_on_disconnect=exit_on_disconnect)
+    )
     asyncio.run(app.run())
 
 

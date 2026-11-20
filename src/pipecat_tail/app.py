@@ -21,7 +21,8 @@ hold the detail:
 5. Logs.
 
 The app knows nothing about where messages come from. The standalone CLI feeds
-it from a websocket or the demo, and ``TailWorker`` from a queue.
+it from a websocket or the demo; ``TailWorker`` shows it in the bot's own
+terminal by running that CLI.
 """
 
 import datetime
