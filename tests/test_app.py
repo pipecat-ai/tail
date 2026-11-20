@@ -611,6 +611,27 @@ async def test_a_dialog_says_the_call_ended_and_how_it_went():
 
 
 @pytest.mark.asyncio
+async def test_a_message_tail_fails_on_is_skipped():
+    app = TailApp()
+    async with app.run_test(size=(100, 40)) as pilot:
+        apply = app.state.apply
+
+        def apply_or_fail(message):
+            if message.get("type") == "tail-broken":
+                raise KeyError("missing")
+            return apply(message)
+
+        app.state.apply = apply_or_fail  # type: ignore[method-assign]
+        await app.handle_message({"label": "tail", "type": "tail-broken"})
+        # The messages after it still arrive.
+        await feed(app, pilot)
+        assert app.state.has_bot
+        skipped = [r for r in app.state.logs if "tail-broken" in r.message]
+        assert len(skipped) == 1 and skipped[0].level == "ERROR"
+        assert "KeyError" in skipped[0].message
+
+
+@pytest.mark.asyncio
 async def test_a_new_call_closes_the_call_ended_dialog():
     from pipecat_tail.demo import WORKER
     from pipecat_tail.widgets.ended import CallEnded

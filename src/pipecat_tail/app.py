@@ -24,7 +24,9 @@ The app knows nothing about where messages come from. The standalone CLI feeds
 it from a websocket or the demo, and ``TailWorker`` from a queue.
 """
 
+import datetime
 import time
+import traceback
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional, Sequence
 
@@ -253,6 +255,7 @@ class TailApp(App):
         self._dirty: set[str] = set()
         self._new_bus: list = []
         self._new_logs: list = []
+        self._told_skipping = False
         # The call the end of which was last announced, as (worker, started).
         self._announced_call: Optional[tuple[Optional[str], Optional[float]]] = None
         self._last_slow_tick = 0.0
@@ -343,9 +346,36 @@ class TailApp(App):
     async def handle_message(self, message: dict[str, Any]) -> None:
         """Fold one wire message into the state and schedule a refresh.
 
+        A message Tail fails on is skipped, and said so in the logs: the
+        messages after it still arrive.
+
         Args:
             message: A decoded wire message.
         """
+        try:
+            self._fold(message)
+        except Exception as e:
+            self._skip(message, e)
+
+    def _skip(self, message: dict[str, Any], error: Exception) -> None:
+        frame = traceback.extract_tb(error.__traceback__)[-1]
+        where = f"{Path(frame.filename).name}:{frame.lineno}"
+        text = f"skipped a {message.get('type')} message: {type(error).__name__}: {error} ({where})"
+        log = {
+            "level": "ERROR",
+            "name": "pipecat_tail",
+            "function": "handle_message",
+            "message": text,
+        }
+        log["time"] = datetime.datetime.now().astimezone().isoformat()
+        self._fold({"label": "tail", "type": "tail-log", "data": log})
+        if not self._told_skipping:
+            self._told_skipping = True
+            self.notify(
+                "Tail skipped a message it failed on: see Logs", severity="error", timeout=8
+            )
+
+    def _fold(self, message: dict[str, Any]) -> None:
         last_bus = _newest(self.state.bus)
         last_log = _newest(self.state.logs)
         before_workers = set(self.state.sessions)
