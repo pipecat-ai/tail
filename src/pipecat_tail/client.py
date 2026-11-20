@@ -109,6 +109,15 @@ class TailClient:
         if self._on_status:
             await self._on_status(status, detail)
 
+    async def _deliver(self, message: dict[str, Any]) -> None:
+        # One message the handler fails on mustn't end the connection.
+        try:
+            await self._on_message(message)
+        except Exception as e:
+            logger.warning(
+                f"ᓚᘏᗢ Tail: skipped a {message.get('type')} message: {type(e).__name__}: {e}"
+            )
+
     async def _run(self) -> None:
         import websockets
 
@@ -130,7 +139,7 @@ class TailClient:
                             logger.warning("ᓚᘏᗢ Tail: dropping undecodable message")
                             continue
                         if isinstance(message, dict):
-                            await self._on_message(message)
+                            await self._deliver(message)
             except asyncio.CancelledError:
                 raise
             except Exception as e:

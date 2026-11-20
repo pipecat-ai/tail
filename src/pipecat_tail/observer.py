@@ -34,6 +34,7 @@ pipeline worker its observer::
 
 import dataclasses
 import datetime
+import functools
 import math
 import time
 from collections import OrderedDict
@@ -231,6 +232,27 @@ class _SeenFrames:
         return True
 
 
+def _contained(hook):
+    """Run an observer hook so that no error of Tail's reaches Pipecat.
+
+    Before Pipecat 1.16 an exception ends the observer's task: Tail would go
+    quiet for the rest of the call while frames piled up for it. The error is
+    logged once for each hook and kind, and the frame is skipped.
+    """
+
+    @functools.wraps(hook)
+    async def run(self, *args):
+        try:
+            await hook(self, *args)
+        except Exception as e:
+            key = (hook.__name__, type(e).__name__)
+            if key not in self._failed:
+                self._failed.add(key)
+                logger.opt(exception=e).error(f"ᓚᘏᗢ Tail: {hook.__name__} failed, skipping")
+
+    return run
+
+
 def audio_level(audio: bytes) -> float:
     """How loud 16-bit PCM audio is, from 0 to 1, for drawing.
 
@@ -238,7 +260,8 @@ def audio_level(audio: bytes) -> float:
     loudness, which integrates over a window and sits near 1 for any speech,
     this follows syllables, so the voice timeline shows speech as speech.
     """
-    samples = np.frombuffer(audio, dtype=np.int16)
+    # A chunk can end mid-sample; the odd byte is dropped.
+    samples = np.frombuffer(audio[: len(audio) // 2 * 2], dtype=np.int16)
     if samples.size == 0:
         return 0.0
     rms = math.sqrt(float(np.mean(np.square(samples.astype(np.float32)))))
@@ -338,6 +361,7 @@ class TailObserver(BaseObserver):
         self._contexts = ContextTracker()
         self._logger_id: Optional[int] = None
         self._started = False
+        self._failed: set[tuple[str, str]] = set()
 
         self._flow_interval = flow_interval_secs
         self._flow_started = time.monotonic()
@@ -453,6 +477,7 @@ class TailObserver(BaseObserver):
     # Frame hooks: run RTVI, then every child observer.
     #
 
+    @_contained
     async def on_process_frame(self, data: FrameProcessed):
         """Forward the hook, finding the worker as the StartFrame leaves its source."""
         if not self._started:
@@ -465,6 +490,7 @@ class TailObserver(BaseObserver):
         for child in self._children:
             await child.on_process_frame(data)
 
+    @_contained
     async def on_push_frame(self, data: FramePushed):
         """Forward the hook and emit Tail-specific messages for some frames."""
         if not self._started:
@@ -515,6 +541,7 @@ class TailObserver(BaseObserver):
             if data.direction == FrameDirection.DOWNSTREAM:
                 await self._handle_vad(frame)
 
+    @_contained
     async def on_processor_setup(self, data):
         """Find the worker and forward the hook to child observers (Pipecat 1.8+)."""
         # A client can connect before the pipeline starts, and its timing
@@ -528,6 +555,7 @@ class TailObserver(BaseObserver):
             if hook is not None:
                 await hook(data)
 
+    @_contained
     async def on_startup_warmup(self, data):
         """Forward the hook to child observers (Pipecat 1.9 to 1.11)."""
         for child in self._children:
@@ -535,6 +563,7 @@ class TailObserver(BaseObserver):
             if hook is not None and hook is not getattr(BaseObserver, "on_startup_warmup", None):
                 await hook(child, data)
 
+    @_contained
     async def on_pipeline_started(self):
         """Announce the pipeline and forward the hook to child observers."""
         if not self._started:

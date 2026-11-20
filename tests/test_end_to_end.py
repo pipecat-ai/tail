@@ -250,6 +250,31 @@ async def test_observer_with_callback_sink():
 
 
 @pytest.mark.asyncio
+async def test_an_error_in_the_observer_never_reaches_pipecat(monkeypatch):
+    """Tail skips the frame it failed on and goes on with the call.
+
+    Before Pipecat 1.16 an exception ended the observer's task, and Tail went
+    quiet for the rest of the call.
+    """
+    logger.remove()
+    received: list[dict] = []
+
+    async def on_message(message):
+        received.append(message)
+
+    async def fail(self, data):
+        raise ValueError("a Tail bug")
+
+    monkeypatch.setattr(TailObserver, "_count_flow", fail)
+    await run_pipeline("bot-11", lambda _: TailObserver(sink=CallbackSink(on_message)))
+    logger.add(lambda _: None)
+
+    types = [m["type"] for m in received]
+    assert "tail-pipeline-started" in types
+    assert types[-1] == "tail-pipeline-finished"
+
+
+@pytest.mark.asyncio
 async def test_observer_without_worker_discovers_processors():
     logger.remove()
     received: list[dict] = []
@@ -725,6 +750,8 @@ async def test_tail_workers_in_one_process_share_one_app(monkeypatch):
 
 def test_audio_level_follows_loudness():
     assert audio_level(b"") == 0.0
+    # A chunk that ends mid-sample is measured, not an error.
+    assert audio_level(speech(amplitude=0.5) + b"\x01") > 0.5
     assert audio_level(b"\x00\x00" * 320) == 0.0
     loud = audio_level(speech(amplitude=0.5))
     quiet = audio_level(speech(amplitude=0.02))
