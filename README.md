@@ -19,19 +19,7 @@ uv tool install "pipecat-ai[cli]" --with pipecat-ai-tail
 pipecat tail --demo
 ```
 
-The demo plays a scripted call, with tool calls, an interruption, a typed message, a photo, an error and a turn that ended too early, so you can look around before bringing your own bot. Then add Tail to your bot's project, and its observer to the pipeline:
-
-```bash
-uv add pipecat-ai-tail
-```
-
-```python
-from pipecat_tail import TailObserver
-
-worker = PipelineWorker(pipeline, observers=[TailObserver()])
-```
-
-Start the bot, and `pipecat tail` in another terminal.
+The demo plays a scripted call, with tool calls, an interruption, a typed message, a photo, an error and a turn that ended too early, so you can look around before [bringing your own bot](#getting-started).
 
 ## What it shows
 
@@ -44,37 +32,62 @@ Start the bot, and `pipecat tail` in another terminal.
 
 ## A tour
 
-The top of the screen is always there: the bot's state (**LISTENING**, **THINKING** or **SPEAKING**), the voice-to-voice clock, the current turn's time so far and, on wide terminals, the session: median and worst response, answers on target, early ends, interruptions and errors. A processor error shows as a red line until `x` dismisses it (`e` finds it in the logs). The status line says whether a call is on (`● call 2:31`), ended, or the bot is gone and Tail is reconnecting. When a call ends, a dialog says so and how it went: its length and turns, response times, early ends, interruptions and errors.
+The top of the screen is always there. It shows:
 
-Response times are green under your target, amber up to 1.6 times it and red above, with ✓, ▲ and ✕ so they never rely on color alone. The target is 1 s; set yours with `pipecat tail --target 0.8`.
+- The bot's state: **LISTENING**, **THINKING** or **SPEAKING**.
+- The voice-to-voice clock, and where the current turn's time is going.
+- On wide terminals, the session: median and worst response, early ends, interruptions and errors.
 
-Below the top are five views. The key line at the bottom lists the current view's keys:
+Response times are green under your target, amber up to 1.6 times it, and red above. ✓, ▲ and ✕ mark them too, so they never rely on color alone. The target is 1 s. Change it with `pipecat tail --target 0.8`.
+
+Below the top are five views:
 
 | View | What it shows |
 | --- | --- |
 | **1 Live** | The voice timeline over the conversation, following the latest turn |
-| **2 Latency** | Where each answer's time went, stage by stage, and how soon your turns ended |
-| **3 Pipeline** | The processors and the frames moving through them, startup timing, workers, jobs and the bus |
-| **4 Metrics** | Each service's timings (last, recent, median, worst), then tokens, characters and audio used |
+| **2 Latency** | Where each answer's time went, and how soon your turns ended |
+| **3 Pipeline** | The processors and their frames, startup timing, workers, jobs and the bus |
+| **4 Metrics** | Each service's timings, then tokens, characters and audio used |
 | **5 Logs** | Log records with a level filter, search and pinned errors |
 
-**Live** follows the call like a page: the text stays put while it fills the panel, and when it reaches the bottom the panel jumps so the latest line is in the middle, so you read down instead of watching lines crawl up. To look back, `n` jumps to the next turn where something went wrong and `p` to the previous one; `/` searches what you and the bot said, and `n` `p` then step through the matches. While you look back, and once the call is over, the voice timeline keeps only its lanes and the key line shows `f follow` in amber: `f` follows the latest turn again.
+**Live** follows the call. The text stays put until it fills the panel, then jumps so the latest line is in the middle. `n` and `p` jump between the turns where something went wrong.
 
-**The turn inspector** opens on Enter, three pages that end at the raw data (`tab` moves between them, `←` `→` between turns, `y` copies the turn as JSON):
+**The turn inspector** opens on Enter. It has three pages:
 
-- **turn**: what was said, where the time went, tool calls pretty-printed, delivery and the turn-completion marker; for an early end, what Pipecat heard and how soon you went on.
-- **context**: what the LLM saw for this turn, with what's new since the last turn marked: the system instruction, the tools offered with their parameters, and every message, tool calls and results included, images as thumbnails.
-- **events**: every message Tail received for the turn, in order, timed from when you started speaking.
+- **turn**: what was said, where the time went, and the tool calls.
+- **context**: exactly what the LLM saw, with what's new marked.
+- **events**: every message Tail received for the turn.
 
-**Early ends of turn** are the bug you can feel but can't see. When you pause mid-sentence, Pipecat may decide you've finished: the LLM starts on what it heard, and when you go on, what you say next reaches it as another message. Tail flags such turns `▲ early end`, marks them on the voice timeline, counts them, and explains them in the turn inspector with how soon you went on. They're the signal for tuning the VAD's `stop_secs` or your turn analyzer, and the Latency view's speech lanes put raw VAD next to each turn's end to help.
+**Early ends of turn** are flagged `▲ early end`. Pipecat ended your turn at a pause, and you went on before the bot spoke. Tail marks them on the voice timeline, counts them, and explains each one in the inspector. They tell you to tune the VAD's `stop_secs` or your turn analyzer.
+
+A processor error shows as a red line at the top until you dismiss it. When a call ends, a dialog sums it up.
 
 ### Keys
 
-- Anywhere: `1`–`5` switch views, `?` shows help (starting with what each mark on the screen means), `x` dismisses the error banner, `s` saves a report, `w` switches worker, `t` switches theme, `c` reconnects, `q` quits (asking first once a bot has shown up: `q` again or Enter confirms).
-- Turns, in Live and Latency: `↑` `↓` select a turn, `⏎` inspects it.
-- Live: `n` `p` jump to the next or previous issue, `/` searches what was said, `esc` ends the search, `f` follows or pauses, `+` `-` zoom the voice timeline.
-- Logs: `n` `p` select the next or previous error, `/` searches, `l` cycles the level, `f` follows or pauses. `e`, anywhere, shows the latest error here.
-- Pipeline: `b` cycles the bus filter.
+| Key | Where | What it does |
+| --- | --- | --- |
+| `1`–`5` | Anywhere | Switch view |
+| `?` | Anywhere | Help, starting with what each mark means |
+| `s` | Anywhere | Save a report |
+| `w` | Anywhere | Switch worker |
+| `t` | Anywhere | Switch theme |
+| `c` | Anywhere | Reconnect |
+| `x` | Anywhere | Dismiss the error line |
+| `e` | Anywhere | Show the latest error in Logs |
+| `q` | Anywhere | Quit, asking first once a bot has shown up |
+| `↑` `↓` | Live, Latency | Select a turn |
+| `⏎` | Live, Latency | Inspect the turn |
+| `n` `p` | Live | Next or previous issue, or search match |
+| `+` `-` | Live | Zoom the voice timeline |
+| `n` `p` | Logs | Next or previous error |
+| `l` | Logs | Cycle the log level |
+| `/` | Live, Logs | Search |
+| `esc` | Live, Logs | End the search |
+| `f` | Live, Logs | Follow, or pause following |
+| `b` | Pipeline | Cycle the bus filter |
+| `tab` | Inspector | Next page |
+| `←` `→` | Inspector | Previous or next turn |
+| `y` | Inspector | Copy the turn as JSON |
 
 ## Getting started
 
@@ -85,43 +98,55 @@ Below the top are five views. The key line at the bottom lists the current view'
 
 ### Install
 
-Tail has two halves: an observer inside your bot that reports what happens, and the dashboard that shows it. The bot's project always needs Tail:
+Add Tail to your bot's project:
 
 ```bash
 uv add pipecat-ai-tail
 ```
 
-To watch from another terminal, or another machine, install the dashboard as a `pipecat` command too. It ships with Pipecat's `cli` extra:
+To watch from another terminal, or another machine, also install the `pipecat tail` command. It ships with Pipecat's `cli` extra:
 
 ```bash
 uv tool install "pipecat-ai[cli]" --with pipecat-ai-tail
 ```
 
-Keep the two on the same version of Tail.
+Keep both on the same version of Tail.
 
-### Option A: observer in code
+### Pipecat 1.3 and later
 
-Add `TailObserver` to your pipeline worker (a `PipelineTask` before Pipecat 1.3). It serves its own websocket, and `pipecat tail` connects to it:
-
-```python
-from pipecat_tail import TailObserver
-
-worker = PipelineWorker(pipeline, observers=[TailObserver()])
-```
-
-To also see workers, jobs and the bus (Pipecat 1.3+), add a `TailWorker` serving the app to the runner instead. It gives the worker its observer:
+Add a `TailWorker` to the runner, next to your bot's worker:
 
 ```python
 from pipecat_tail import TailWorker
 
 runner = WorkerRunner()
-await runner.add_workers(worker, TailWorker(worker, server=True))
+await runner.add_workers(worker, TailWorker(worker))
 await runner.run()
 ```
 
-### Option B: without touching the bot's code
+The dashboard opens in the bot's own terminal. Quitting it stops the bot. While it's open, the bot's output is kept off the terminal and shown when it closes. Without a terminal (in a container, say), Tail serves it for `pipecat tail` instead.
 
-Pipecat runs the hooks of the setup files listed in `PIPECAT_SETUP_FILES`, so a file of three lines attaches Tail to a bot you'd rather not edit:
+To watch from another terminal instead, pass `server=True` and run `pipecat tail` there:
+
+```python
+await runner.add_workers(worker, TailWorker(worker, server=True))
+```
+
+### Pipecat 1.0 to 1.2
+
+Add a `TailObserver` to your pipeline task, and run `pipecat tail` in another terminal:
+
+```python
+from pipecat_tail import TailObserver
+
+task = PipelineTask(pipeline, observers=[TailObserver()])
+```
+
+You get everything except workers, jobs and the bus, which need Pipecat 1.3.
+
+### Without changing the bot's code
+
+Pipecat runs the setup files listed in `PIPECAT_SETUP_FILES`. This one adds Tail to a bot on Pipecat 1.3 or later:
 
 ```python
 # tail_setup.py
@@ -136,21 +161,7 @@ PIPECAT_SETUP_FILES=tail_setup.py python bot.py
 pipecat tail    # in another terminal
 ```
 
-With Pipecat 1.0 to 1.2 the hook is `setup_pipeline_task(task)`.
-
-### Option C: the dashboard in the bot's terminal
-
-`TailWorker` (Pipecat 1.3+) gives the pipeline workers you hand it their observers and opens the dashboard in the same terminal, no separate command needed:
-
-```python
-from pipecat_tail import TailWorker
-
-runner = WorkerRunner()
-await runner.add_workers(worker, TailWorker(worker))
-await runner.run()
-```
-
-It takes several pipeline workers when the runner runs more than one, and `w` switches between them. While the dashboard is open the bot's output is kept off the terminal, and shown there once it closes (output to a file is untouched). Quitting it with `q` stops the bot, as the quit dialog warns during a call, and the bot's own log shows it shutting down. When the call ends first, the dashboard stays open until you quit, and under a development runner the next call shows up in it.
+On Pipecat 1.0 to 1.2, name the function `setup_pipeline_task(task)` and call `task.add_observer(TailObserver())`.
 
 ## Pipecat versions
 
@@ -214,7 +225,7 @@ uv run pytest
 uv run --group examples examples/bot.py
 ```
 
-That opens the dashboard in the same terminal with a `TailWorker` (option C). `TAIL_RUNNER=observer` runs it with a `TailObserver` instead (option A); then run `pipecat tail` in another terminal.
+That opens the dashboard in the same terminal with a `TailWorker`. `TAIL_RUNNER=observer` runs it with a `TailObserver` instead; then run `pipecat tail` in another terminal.
 
 Changes are recorded as [towncrier](https://towncrier.readthedocs.io/) fragments in `changelog/`.
 
