@@ -525,13 +525,13 @@ async def test_pipeline_view_says_a_lone_observer_cannot_see_the_runner():
 
         await ready(standalone=True)
         view = app.pipeline_view
-        assert view.worker_tree.border_title == "workers · needs a TailServer"
-        assert view.bus.border_title.endswith("· needs a TailServer")
+        assert view.worker_tree.border_title == "workers · needs a TailWorker"
+        assert view.bus.border_title.endswith("· needs a TailWorker")
         # The worker is listed on its own, without a made-up runner above it.
         assert not view.worker_tree.show_root
         assert "bot-1" in str(view.worker_tree.root.children[0].label)
 
-        # The bot comes back with a TailServer: the runner is there again.
+        # The bot comes back with a TailWorker: the runner is there again.
         await ready(runner="runner-1")
         assert view.worker_tree.border_title == "workers"
         assert "needs" not in view.bus.border_title

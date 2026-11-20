@@ -742,3 +742,14 @@ def test_a_processor_error_is_also_a_line_of_the_logs():
     (line,) = state.logs
     assert line.level == "ERROR" and line.name == "DailyOutputTransport#0"
     assert line.message == "connectivity: connection lost" and line.worker == "bot-1"
+
+
+def test_a_new_call_takes_over_from_one_that_is_over():
+    state = SessionState()
+    state.apply(tail("tail-pipeline-started", {}, worker="call-1"))
+    state.apply(tail("tail-pipeline-started", {}, worker="other"))
+    # A call still going keeps its place.
+    assert state.selected_worker == "call-1"
+    state.apply(tail("tail-pipeline-finished", worker="call-1"))
+    state.apply(tail("tail-pipeline-started", {}, worker="call-2"))
+    assert state.selected_worker == "call-2"

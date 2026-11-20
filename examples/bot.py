@@ -7,7 +7,7 @@
 """A voice bot with Tail attached.
 
 Run it with the Pipecat development runner and open the dashboard in the
-same terminal, with ``TailRunner``::
+same terminal, with a ``TailWorker``::
 
     uv run --group examples examples/bot.py
 
@@ -44,7 +44,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.runner import WorkerRunner
 
-from pipecat_tail import TailObserver, TailRunner
+from pipecat_tail import TailObserver, TailWorker
 
 load_dotenv(override=True)
 
@@ -116,15 +116,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Client disconnected")
         await worker.cancel()
 
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
     if mode == "observer":
-        # Plain runner: Tail comes from the observer above, and `pipecat tail`
-        # runs in another terminal.
-        runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+        # Tail comes from the observer above, and `pipecat tail` runs in
+        # another terminal.
+        await runner.add_workers(worker)
     else:
-        # The dashboard opens in this terminal and the bot's logs go to it.
-        runner = TailRunner()
-
-    await runner.add_workers(worker)
+        # The dashboard opens in this terminal.
+        await runner.add_workers(worker, TailWorker(worker))
     await runner.run()
 
 

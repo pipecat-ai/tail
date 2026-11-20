@@ -12,12 +12,14 @@ import pytest
 
 from pipecat_tail import compat
 
-pytestmark = pytest.mark.skipif(not compat.HAS_WORKERS, reason="TailRunner needs Pipecat 1.3+")
+pytestmark = pytest.mark.skipif(
+    not compat.HAS_WORKERS, reason="the app here comes with TailWorker, Pipecat 1.3+"
+)
 
 
 def start_app(queue):
     """Run the app the way the app process does, headless, in a thread."""
-    from pipecat_tail.runner import TailAppProcess
+    from pipecat_tail.dashboard import TailAppProcess
 
     process = TailAppProcess(queue, headless=True)
     finished = threading.Event()
@@ -46,7 +48,7 @@ def test_app_exits_while_its_queue_is_idle():
 
 
 def test_quit_message_closes_the_app():
-    from pipecat_tail.runner import QUIT
+    from pipecat_tail.dashboard import QUIT
 
     queue = Queue()
     _, finished = start_app(queue)
@@ -54,19 +56,10 @@ def test_quit_message_closes_the_app():
     assert finished.wait(10), "the app did not exit"
 
 
-def test_end_of_messages_keeps_the_app_open():
-    queue = Queue()
-    process, finished = start_app(queue)
-    queue.put(None)
-    assert not finished.wait(0.5)
-    process._app.call_from_thread(process._app.exit)
-    assert finished.wait(10)
-
-
 def test_terminal_output_is_hidden_while_the_app_draws(monkeypatch, capfd):
     import os
 
-    from pipecat_tail.runner import _TerminalOutput
+    from pipecat_tail.dashboard import _TerminalOutput
 
     # Pretend stdout and stderr are the terminal (pytest captures them).
     monkeypatch.setattr(os, "isatty", lambda fd: True)
@@ -87,7 +80,7 @@ def test_terminal_output_is_hidden_while_the_app_draws(monkeypatch, capfd):
 def test_terminal_output_to_a_file_is_left_alone(monkeypatch, capfd):
     import os
 
-    from pipecat_tail.runner import _TerminalOutput
+    from pipecat_tail.dashboard import _TerminalOutput
 
     monkeypatch.setattr(os, "isatty", lambda fd: False)
     output = _TerminalOutput()

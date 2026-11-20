@@ -59,7 +59,7 @@ class WorkerTree(Tree):
     def sync(self, state: SessionState) -> None:
         """Rebuild the tree from the state."""
         self.clear()
-        # Without a TailServer nothing reports the runner: show only the
+        # Without a TailWorker nothing reports the runner: show only the
         # pipeline workers themselves.
         self.show_root = not state.info.get("standalone")
         root_label = Text()

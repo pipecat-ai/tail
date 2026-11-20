@@ -4,22 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Runner integration for launching the Tail app alongside a pipeline.
+"""The Tail app in the bot's own terminal.
 
-``TailRunner`` is a ``WorkerRunner`` that runs the Tail app in a separate
-process and feeds it from a ``TailServer`` worker through a multiprocessing
-queue. Every ``PipelineWorker`` added to the runner gets a ``TailObserver``
-automatically::
-
-    runner = TailRunner()
-    await runner.add_workers(bot)
-    await runner.run()
-
-The pipeline process keeps running until the pipeline finishes or the app is
-closed. When the pipeline finishes first, the app stays open so the session
-can still be read; quitting it returns from ``run()``. When ``run()`` is
-cancelled (for example by the development runner shutting down on Ctrl-C),
-the pipeline is cancelled and the app closes.
+The app runs in a process of its own, fed through a queue, so drawing the
+screen never holds up the bot's event loop. A process has one app, shared by
+every ``TailWorker`` that shows the dashboard here: a development runner
+starts the bot again for every call, and the calls take turns in the one app,
+which stays open until it's closed.
 """
 
 import asyncio
@@ -31,16 +22,8 @@ import threading
 from multiprocessing import Process, Queue
 from typing import IO, Optional
 
-from loguru import logger
-from pipecat.pipeline.worker import PipelineWorker
-from pipecat.workers.base_worker import BaseWorker
-from pipecat.workers.runner import WorkerRunner
-
-from pipecat_tail.server import TailServer
-from pipecat_tail.sink import QueueSink
-
 QUIT = "quit"
-"""Put on the app's queue to close the app. ``None`` only ends the messages."""
+"""Put on the app's queue to close the app."""
 
 APP_QUIT_TIMEOUT_SECS = 5.0
 """How long the app gets to close when asked before its process is terminated."""
@@ -108,8 +91,7 @@ class TailAppProcess:
         """Initialize the process wrapper.
 
         Args:
-            queue: Queue the app reads messages from. ``None`` ends the
-                messages and ``QUIT`` closes the app.
+            queue: Queue the app reads messages from. ``QUIT`` closes the app.
             headless: Run the app without a terminal (for tests).
         """
         self._queue = queue
@@ -180,14 +162,12 @@ class TailAppProcess:
             except RuntimeError:
                 # The app has exited.
                 return
-            if message is None or message == QUIT:
+            if message == QUIT:
                 return
 
     async def _handle_messages(self, inbox: asyncio.Queue):
         while True:
             message = await inbox.get()
-            if message is None:
-                return
             if message == QUIT:
                 if self._app:
                     self._app.exit()
@@ -196,98 +176,58 @@ class TailAppProcess:
                 await self._app.handle_message(message)
 
 
-class TailRunner(WorkerRunner):
-    """Worker runner that shows the Tail app while the pipeline runs.
+class _Dashboard:
+    """The app of this process, shared by the workers that show it here.
 
-    Args:
-        name: Optional runner name.
-        handle_sigint: Whether the runner handles SIGINT. Off by default: the
-            app owns the terminal and Ctrl-C is handled there.
-        handle_sigterm: Whether the runner handles SIGTERM.
-        **kwargs: Passed to ``WorkerRunner``.
+    A development runner starts the bot again for every call, each time with
+    a ``TailWorker`` of its own. They all report to the one app, which stays
+    open from call to call until it's closed: two apps would fight over the
+    terminal.
     """
 
-    def __init__(
-        self,
-        *,
-        name: Optional[str] = None,
-        handle_sigint: bool = False,
-        handle_sigterm: bool = False,
-        **kwargs,
-    ):
-        """Initialize the runner. See the class docstring for the arguments."""
-        super().__init__(
-            name=name, handle_sigint=handle_sigint, handle_sigterm=handle_sigterm, **kwargs
-        )
-        self._queue: Queue = Queue()
-        self._server = TailServer(sink=QueueSink(self._queue))
-        self._server_added = False
+    def __init__(self):
+        self.queue: Optional[Queue] = None
+        self.process: Optional[Process] = None
+        self.closed: Optional[asyncio.Task] = None
+        self.output = _TerminalOutput()
 
-    @property
-    def server(self) -> TailServer:
-        """The Tail server worker feeding the app."""
-        return self._server
-
-    async def add_workers(self, *workers: BaseWorker) -> None:
-        """Register workers, attaching a Tail observer to each pipeline worker."""
-        for worker in workers:
-            if isinstance(worker, PipelineWorker):
-                worker.add_observer(self._server.create_observer(worker))
-        await super().add_workers(*workers)
-
-    async def run(self, worker: Optional[BaseWorker] = None, *, auto_end: bool = True) -> None:
-        """Run the workers and the Tail app until either finishes.
-
-        Args:
-            worker: Deprecated. A worker to add before running; prefer
-                ``add_workers()``.
-            auto_end: End when every root worker has finished.
-        """
-        if worker is not None:
-            await self.add_workers(worker)
-        if not self._server_added:
-            self._server_added = True
-            await self.add_workers(self._server)
-
-        output = _TerminalOutput()
-        process = self._start_app()
-        output.hide()
-        app_task = asyncio.create_task(asyncio.to_thread(process.join))
-        run_task = asyncio.create_task(super().run(auto_end=auto_end))
-        try:
-            await asyncio.wait([app_task, run_task], return_when=asyncio.FIRST_COMPLETED)
-            if not run_task.done():
-                # The app was closed: the terminal is ours again, so the
-                # pipeline stopping shows up in it.
-                output.restore()
-                logger.info("ᓚᘏᗢ Tail: closed, stopping the bot")
-                await self.cancel(reason="Tail closed")
-                await run_task
-            # No more messages. The app stays open so the session can be read.
-            self._queue.put(None)
-            await app_task
-            output.restore()
-            run_task.result()
-        except asyncio.CancelledError:
-            # The bot is being shut down from outside: close the app, then end
-            # the pipeline in view, so nothing is left waiting on the other.
-            await self._close_app(process, app_task)
-            output.restore()
-            if not run_task.done():
-                await self.cancel(reason="Shutting down")
-            await asyncio.wait([run_task])
-            raise
-        finally:
-            output.restore()
+    def open(self) -> asyncio.Task:
+        """Open the app unless it is, and return what ends when it closes."""
+        if self.closed is None or self.closed.done():
+            self.queue = Queue()
+            self.process = self.start_app(self.queue)
+            self.output.hide()
+            self.closed = asyncio.create_task(asyncio.to_thread(self.process.join))
+            # The terminal is the bot's again: show what it wrote meanwhile.
+            self.closed.add_done_callback(lambda _: self.output.restore())
             # Messages the app will never read must not hold up our exit.
-            self._queue.cancel_join_thread()
+            self.queue.cancel_join_thread()
+        return self.closed
 
-    async def _close_app(self, process: Process, app_task: asyncio.Task):
-        self._queue.put(QUIT)
-        await asyncio.wait([app_task], timeout=APP_QUIT_TIMEOUT_SECS)
-        if not app_task.done():
-            process.terminate()
-            await asyncio.wait([app_task])
+    def start_app(self, queue: Queue) -> Process:
+        """Start the app's process."""
+        return TailAppProcess(queue).start()
 
-    def _start_app(self) -> Process:
-        return TailAppProcess(self._queue).start()
+    async def close(self) -> None:
+        """Ask the app to close, and end its process if it doesn't."""
+        if self.closed is None or self.queue is None:
+            return
+        self.queue.put(QUIT)
+        await asyncio.wait([self.closed], timeout=APP_QUIT_TIMEOUT_SECS)
+        if not self.closed.done() and self.process is not None:
+            self.process.terminate()
+            await asyncio.wait([self.closed])
+
+    async def emit(self, message: dict) -> None:
+        """Deliver a message to the app that is open."""
+        if self.queue is not None:
+            self.queue.put(message)
+
+
+DASHBOARD = _Dashboard()
+"""This process's app."""
+
+
+async def to_dashboard(message: dict) -> None:
+    """Deliver a message to whichever app this process has open."""
+    await DASHBOARD.emit(message)

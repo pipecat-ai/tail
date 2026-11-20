@@ -26,9 +26,10 @@ Standalone use, where the observer serves its own websocket::
 
     worker = PipelineWorker(pipeline, observers=[TailObserver()])
 
-Runner use, where a ``TailServer`` worker owns the connection::
+Runner use, where a ``TailWorker`` owns the connection and gives each
+pipeline worker its observer::
 
-    worker.add_observer(server.create_observer(worker))
+    await runner.add_workers(worker, TailWorker(worker))
 """
 
 import dataclasses
@@ -291,7 +292,7 @@ class TailObserver(BaseObserver):
             ``default_rtvi_params()``. Audio levels are always Tail's own;
             ``audio_level_period_secs`` sets how often they are sent.
         log_level: Minimum loguru level forwarded as log messages, or None to
-            leave the logs to whoever owns the connection: a ``TailServer``
+            leave the logs to whoever owns the connection: a ``TailWorker``
             forwards them once for all its pipelines.
         flow_interval_secs: How often frame flow counts are reported.
         **kwargs: Passed to the private ``RTVIObserver``.
@@ -579,7 +580,7 @@ class TailObserver(BaseObserver):
         ready = TailReadyMessage()
         ready.data["capabilities"] = compat.capabilities()
         # Serving its own websocket, the observer reports one pipeline: the
-        # runner's workers, jobs and bus need a TailServer.
+        # runner's workers, jobs and bus need a TailWorker.
         ready.data["standalone"] = True
         await self.send_tail_message(ready)
 

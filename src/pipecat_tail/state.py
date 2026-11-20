@@ -1140,6 +1140,9 @@ class SessionState:
                 return {STATUS, STRIP, WORKERS}
             case "tail-pipeline-started":
                 session = self.session(worker)
+                if self.selected is not session and self.selected.finished:
+                    # A new call takes over from one that is over.
+                    self.selected_worker = worker
                 session.finished = False
                 session.started_at = timestamp
                 processors = data.get("processors")

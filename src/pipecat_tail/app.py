@@ -21,7 +21,7 @@ hold the detail:
 5. Logs.
 
 The app knows nothing about where messages come from. The standalone CLI feeds
-it from a websocket or the demo, and ``TailRunner`` from a queue.
+it from a websocket or the demo, and ``TailWorker`` from a queue.
 """
 
 import time
@@ -424,7 +424,7 @@ class TailApp(App):
             note = "needs Pipecat 1.3+ (WorkerRunner)"
         elif self.state.info.get("standalone"):
             # A TailObserver on its own sees its pipeline, not the runner.
-            note = "needs a TailServer"
+            note = "needs a TailWorker"
         else:
             note = ""
         view = self.pipeline_view

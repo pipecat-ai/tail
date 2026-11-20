@@ -109,15 +109,13 @@ from pipecat_tail import TailObserver
 worker = PipelineWorker(pipeline, observers=[TailObserver()])
 ```
 
-To also see workers, jobs and the bus (Pipecat 1.3+), add a `TailServer` to the runner and let it create the observer:
+To also see workers, jobs and the bus (Pipecat 1.3+), add a `TailWorker` serving the app to the runner instead. It gives the worker its observer:
 
 ```python
-from pipecat_tail import TailServer
+from pipecat_tail import TailWorker
 
-tail = TailServer()
 runner = WorkerRunner()
-await runner.add_workers(worker, tail)
-worker.add_observer(tail.create_observer(worker))
+await runner.add_workers(worker, TailWorker(worker, server=True))
 await runner.run()
 ```
 
@@ -140,19 +138,19 @@ pipecat tail    # in another terminal
 
 With Pipecat 1.0 to 1.2 the hook is `setup_pipeline_task(task)`.
 
-### Option C: runner with the app built in
+### Option C: the dashboard in the bot's terminal
 
-`TailRunner` is a `WorkerRunner` (Pipecat 1.3+) that opens the dashboard in the same terminal, no separate command needed:
+`TailWorker` (Pipecat 1.3+) gives the pipeline workers you hand it their observers and opens the dashboard in the same terminal, no separate command needed:
 
 ```python
-from pipecat_tail import TailRunner
+from pipecat_tail import TailWorker
 
-runner = TailRunner()
-await runner.add_workers(worker)
+runner = WorkerRunner()
+await runner.add_workers(worker, TailWorker(worker))
 await runner.run()
 ```
 
-While the dashboard is open the bot's output is kept off the terminal, and shown there once it closes (output to a file is untouched). Quitting it with `q` stops the bot, and the bot's own log shows it shutting down. When the bot finishes first, the dashboard stays open until you quit.
+It takes several pipeline workers when the runner runs more than one, and `w` switches between them. While the dashboard is open the bot's output is kept off the terminal, and shown there once it closes (output to a file is untouched). Quitting it with `q` stops the bot, and the bot's own log shows it shutting down. When the call ends first, the dashboard stays open until you quit, and under a development runner the next call shows up in it.
 
 ## Pipecat versions
 
@@ -161,7 +159,7 @@ Tail works with every Pipecat 1.x release. It looks for what the bot's Pipecat h
 | Pipecat | What Tail adds                                                                                                                                                    |
 |---------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 1.0     | Conversation, audio levels, raw VAD, speaking state, early ends of turn, latency breakdowns, turns, startup timing, metrics, tool calls, errors, frame flow, logs |
-| 1.3     | Workers, jobs and the bus (`TailServer`, `TailRunner`)                                                                                                            |
+| 1.3     | Workers, jobs and the bus (`TailWorker`)                                                                                                                          |
 | 1.9     | Richer metrics, tool call and error reports from Pipecat's dedicated observers; latency breakdowns by contribution                                                |
 | 1.11    | The LLM's turn-completion markers                                                                                                                                 |
 | 1.13    | `user-input`: typed messages, backchannels, interim transcriptions; the raw STT, LLM and TTS text                                                                 |
@@ -216,7 +214,7 @@ uv run pytest
 uv run --group examples examples/bot.py
 ```
 
-That opens the dashboard in the same terminal with `TailRunner` (option C). `TAIL_RUNNER=observer` runs it with a `TailObserver` instead (option A); then run `pipecat tail` in another terminal.
+That opens the dashboard in the same terminal with a `TailWorker` (option C). `TAIL_RUNNER=observer` runs it with a `TailObserver` instead (option A); then run `pipecat tail` in another terminal.
 
 Changes are recorded as [towncrier](https://towncrier.readthedocs.io/) fragments in `changelog/`.
 

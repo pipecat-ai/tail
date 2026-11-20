@@ -6,18 +6,18 @@
 
 """Tail as a worker on a ``WorkerRunner``.
 
-``TailServer`` is a Pipecat worker that owns one connection to the Tail app.
-It subscribes to the worker bus, so it sees every worker, job and bus message
-in the runner, and it creates one ``TailObserver`` per pipeline worker so
+``TailWorker`` reports pipeline workers, and the runner they run in, to the
+Tail app. It gives each pipeline worker it's handed a ``TailObserver``, so
 each pipeline's conversation, metrics and logs arrive tagged with the worker
-name.
+name, and it listens on the worker bus, so it sees every worker, job and bus
+message in the runner::
 
-Wire it in code::
-
-    tail = TailServer()
     runner = WorkerRunner()
-    await runner.add_workers(bot, tail)
-    bot.add_observer(tail.create_observer(bot))
+    await runner.add_workers(bot, TailWorker(bot))
+    await runner.run()
+
+The app opens in this terminal. With ``server=True`` it's served instead, for
+``pipecat tail`` in another terminal or on another machine.
 """
 
 import asyncio
@@ -27,10 +27,11 @@ from typing import Any, Optional
 from loguru import logger
 
 try:
+    from pipecat.pipeline.worker import PipelineWorker
     from pipecat.workers.base_worker import BaseWorker
 except ImportError as e:  # Pipecat before 1.3
     raise ImportError(
-        "TailServer needs Pipecat 1.3 or later (WorkerRunner and the worker bus). "
+        "TailWorker needs Pipecat 1.3 or later (WorkerRunner and the worker bus). "
         "With older Pipecat, add a TailObserver to the PipelineTask instead."
     ) from e
 
@@ -67,7 +68,7 @@ from pipecat.frames.frames import (
     UserSpeakingFrame,
 )
 
-from pipecat_tail import compat
+from pipecat_tail import compat, dashboard
 from pipecat_tail.messages import (
     TailBusMessage,
     TailJobMessage,
@@ -79,7 +80,13 @@ from pipecat_tail.messages import (
     tail_serializer,
 )
 from pipecat_tail.observer import TailObserver, forward_logs, stop_forwarding_logs
-from pipecat_tail.sink import DEFAULT_HOST, DEFAULT_PORT, TailSink, TailWebSocketServer
+from pipecat_tail.sink import (
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    CallbackSink,
+    TailSink,
+    TailWebSocketServer,
+)
 
 DEFAULT_EXCLUDE_BUS_FRAMES: tuple[type[Frame], ...] = (
     InputAudioRawFrame,
@@ -148,50 +155,61 @@ def _name(message: BusMessage) -> str:
     return getattr(message, "name", None) or type(message).__name__
 
 
-class TailServer(BaseWorker):
-    """Worker that streams a runner's activity to the Tail app.
+class TailWorker(BaseWorker):
+    """Worker that reports pipeline workers and their runner to the Tail app.
+
+    It stops once every pipeline worker it reports on has finished. With the
+    app in this terminal it stays until the app is closed, so the call can
+    still be read, and closing the app stops the bots it shows.
 
     Args:
+        *workers: The pipeline workers to report on. They get their
+            ``TailObserver`` here, before they start; ``create_observer``
+            adds more later.
+        server: Serve the app on ``host`` and ``port``, for ``pipecat tail``,
+            instead of opening it in this terminal.
+        host: Address the server listens on.
+        port: Port the server listens on.
         name: Worker name. Defaults to ``tail``.
-        host: Address for the websocket server.
-        port: Port for the websocket server.
-        sink: Where to deliver messages. When omitted the worker serves its
-            own websocket on ``host`` and ``port``.
+        sink: Deliver the messages here instead, for tests and embedding.
         exclude_bus_frames: Frame types whose bus messages are not forwarded.
-        auto_stop: Stop this worker, and so let the runner end, once every
-            pipeline worker it observes has finished.
         log_level: Minimum loguru level forwarded as log messages.
     """
 
     def __init__(
         self,
-        name: str = "tail",
-        *,
+        *workers: PipelineWorker,
+        server: bool = False,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
+        name: str = "tail",
         sink: Optional[TailSink] = None,
         exclude_bus_frames: tuple[type[Frame], ...] = DEFAULT_EXCLUDE_BUS_FRAMES,
-        auto_stop: bool = True,
         log_level: str = "DEBUG",
     ):
-        """Initialize the server. See the class docstring for the arguments."""
+        """Initialize the worker. See the class docstring for the arguments."""
         super().__init__(name)
         self._server: Optional[TailWebSocketServer] = None
-        if sink is None:
+        # The app in this terminal, shared by the process's workers.
+        self._here = sink is None and not server
+        if sink is None and server:
             self._server = TailWebSocketServer(
                 host=host, port=port, on_client_connected=self._on_client_connected
             )
             sink = self._server
-        self._sink: TailSink = sink
+        self._sink: TailSink = sink if sink is not None else CallbackSink(dashboard.to_dashboard)
         self._exclude_bus_frames = exclude_bus_frames
-        self._auto_stop = auto_stop
-        self._observed: dict[str, BaseWorker] = {}
+        self._observed: dict[str, PipelineWorker] = {}
         self._pipeline_done: dict[str, asyncio.Event] = {}
         self._registry_snapshot: Optional[dict[str, Any]] = None
         self._runner_name: Optional[str] = None
         self._watch_task: Optional[asyncio.Task] = None
         self._log_level = log_level
         self._logger_id: Optional[int] = None
+        self._app_closed: Optional[asyncio.Task] = None
+        self._closing_task: Optional[asyncio.Task] = None
+        for worker in workers:
+            worker.add_observer(self.create_observer(worker))
 
     @property
     def url(self) -> Optional[str]:
@@ -206,12 +224,12 @@ class TailServer(BaseWorker):
             **kwargs: Passed to ``TailObserver``.
 
         Returns:
-            An observer whose messages flow through this server.
+            An observer whose messages flow through this worker.
         """
         self._observed[worker.name] = worker
         self._pipeline_done[worker.name] = asyncio.Event()
         self._maybe_watch()
-        # The server forwards the process's logs, once for all its pipelines.
+        # This worker forwards the process's logs, once for all its pipelines.
         kwargs.setdefault("log_level", None)
         return TailObserver(sink=self, worker=worker, **kwargs)
 
@@ -229,29 +247,51 @@ class TailServer(BaseWorker):
     #
 
     async def start(self) -> None:
-        """Start the worker and its websocket server."""
+        """Start the worker, and the app here or its server."""
         await super().start()
         self._logger_id = forward_logs(self._send, self._log_level)
+        if self._here:
+            self._app_closed = dashboard.DASHBOARD.open()
+            self._closing_task = asyncio.create_task(self._stop_bots_when_closed())
         if self._server:
             try:
                 await self._server.start()
             except OSError as e:
                 logger.error(f"ᓚᘏᗢ Tail: unable to start server at {self._server.url}: {e}")
         else:
-            # A sink reaches the app directly (TailRunner's queue), so there is
-            # no client to wait for: the app hears it is connected right away.
+            # The app here, or a sink, gets the messages directly: there is no
+            # client to wait for, so the app hears it is connected right away.
             await self._on_client_connected()
         self._maybe_watch()
 
+    async def _stop_bots_when_closed(self) -> None:
+        if self._app_closed is None:
+            return
+        await self._app_closed
+        running = [w for w in self._observed.values() if not w.has_finished()]
+        if running:
+            logger.info("ᓚᘏᗢ Tail: closed, stopping the bot")
+        for worker in running:
+            await worker.cancel(reason="Tail closed")
+
     async def stop(self) -> None:
-        """Stop the websocket server and the worker."""
-        if self._watch_task:
-            self._watch_task.cancel()
-            try:
-                await self._watch_task
-            except asyncio.CancelledError:
-                pass
-            self._watch_task = None
+        """Stop the worker, and its websocket server or the app here.
+
+        It stops on its own once its pipelines have finished and the app here
+        is closed. With the app still open, the runner is shutting it down
+        from outside (as a development runner does on Ctrl-C): the app
+        closes too, so nothing is left waiting on it.
+        """
+        if self._app_closed is not None and not self._app_closed.done():
+            await dashboard.DASHBOARD.close()
+        for task in (self._watch_task, self._closing_task):
+            if task is not None and not task.done() and task is not asyncio.current_task():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        self._watch_task = self._closing_task = None
         stop_forwarding_logs(self._logger_id)
         self._logger_id = None
         if self._server:
@@ -262,7 +302,7 @@ class TailServer(BaseWorker):
         await self.emit(model.model_dump(mode="json", exclude_none=True))
 
     def _maybe_watch(self) -> None:
-        if not self._auto_stop or self._watch_task or not self._observed:
+        if self._watch_task or not self._observed:
             return
         try:
             loop = asyncio.get_running_loop()
@@ -289,6 +329,9 @@ class TailServer(BaseWorker):
                         await asyncio.wait_for(done.wait(), timeout=3.0)
                     except asyncio.TimeoutError:
                         pass
+        if self._app_closed is not None:
+            # The call can still be read: stay until the app is closed.
+            await self._app_closed
         logger.debug("ᓚᘏᗢ Tail: all observed pipelines finished, stopping")
         self._watch_task = None
         await self.stop()

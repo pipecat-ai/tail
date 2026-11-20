@@ -7,14 +7,13 @@
 """Sinks that deliver Tail messages to the Tail app.
 
 A sink is anything with an ``async emit(message: dict)`` method. Tail ships
-three:
+two:
 
 - ``TailWebSocketServer`` serves one Tail client over a websocket. Messages
   produced before a client connects are buffered and replayed to the first
   client so it sees the session from the start.
-- ``QueueSink`` puts messages on a ``multiprocessing.Queue``. ``TailRunner``
-  uses it to feed the app running in a separate process.
-- ``CallbackSink`` calls a coroutine. Tests and embedders use it.
+- ``CallbackSink`` calls a coroutine. ``TailWorker`` feeds the app with it, and
+  tests and embedders use it.
 """
 
 import asyncio
@@ -55,22 +54,6 @@ class CallbackSink:
     async def emit(self, message: dict[str, Any]) -> None:
         """Deliver one message to the callback."""
         await self._callback(message)
-
-
-class QueueSink:
-    """Sink that puts messages on a ``multiprocessing.Queue``."""
-
-    def __init__(self, queue):
-        """Initialize the sink.
-
-        Args:
-            queue: A ``multiprocessing.Queue`` shared with the app process.
-        """
-        self._queue = queue
-
-    async def emit(self, message: dict[str, Any]) -> None:
-        """Put one message on the queue."""
-        self._queue.put(message)
 
 
 class TailWebSocketServer:

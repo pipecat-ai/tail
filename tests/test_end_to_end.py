@@ -2,11 +2,12 @@
 
 These tests run on every Pipecat 1.x release. Pipecat 1.0 to 1.2 run
 pipelines with ``PipelineTask`` and ``PipelineRunner``; 1.3 and later with
-``PipelineWorker`` and ``WorkerRunner``, where ``TailServer`` also reports
+``PipelineWorker`` and ``WorkerRunner``, where ``TailWorker`` also reports
 workers and the bus.
 """
 
 import asyncio
+import contextlib
 import dataclasses
 import json
 import math
@@ -125,8 +126,12 @@ def frames(processor_name: str):
     ]
 
 
-async def run_pipeline(name: str, observer_factory, *, extra_workers=()):
-    """Run ``frames()`` through a one-processor pipeline on this Pipecat."""
+async def run_pipeline(name: str, observer_factory, *, tail=None):
+    """Run ``frames()`` through a one-processor pipeline on this Pipecat.
+
+    ``tail(worker)`` makes a worker to run beside the pipeline's, such as a
+    ``TailWorker`` reporting on it.
+    """
     processor = FakeLLM(name="proc")
     params = PipelineParams(enable_metrics=True, enable_usage_metrics=True)
     if compat.HAS_WORKERS:
@@ -134,7 +139,7 @@ async def run_pipeline(name: str, observer_factory, *, extra_workers=()):
             Pipeline([processor]), name=name, params=params, idle_timeout_secs=None
         )
         runner = WorkerRunner(handle_sigint=False)
-        await runner.add_workers(worker, *extra_workers)
+        await runner.add_workers(worker, *([tail(worker)] if tail else []))
     else:
         worker = PipelineTask(Pipeline([processor]), params=params, idle_timeout_secs=None)
         runner = PipelineRunner(handle_sigint=False)
@@ -334,24 +339,27 @@ async def test_standalone_observer_serves_a_websocket():
 
 @needs_workers
 @pytest.mark.asyncio
-async def test_worker_runner_with_tail_server():
-    from pipecat_tail.server import TailServer
+async def test_worker_runner_with_a_tail_worker_serving_the_app():
+    from pipecat_tail.worker import TailWorker
 
     logger.remove()
     port = free_port()
-    tail = TailServer(host="localhost", port=port)
+    tails: list = []
     reader: asyncio.Task | None = None
 
-    def factory(worker):
-        return tail.create_observer(worker)
+    def make_tail(worker):
+        tails.append(TailWorker(worker, server=True, host="localhost", port=port))
+        return tails[0]
 
     async def start_reader():
         nonlocal reader
         await asyncio.sleep(0.4)
-        reader = asyncio.create_task(collect(tail.url, until="tail-pipeline-finished"))
+        url = f"ws://localhost:{port}"
+        reader = asyncio.create_task(collect(url, until="tail-pipeline-finished"))
 
     starter = asyncio.create_task(start_reader())
-    worker, runner = await run_pipeline("bot-1", factory, extra_workers=(tail,))
+    worker, runner = await run_pipeline("bot-1", lambda _: None, tail=make_tail)
+    tail = tails[0]
     await starter
     assert reader is not None
     messages = await reader
@@ -386,16 +394,20 @@ class FakeAppProcess:
     """Stands in for the app process: reads the queue in ``join()``.
 
     Args:
-        queue: The runner's queue.
+        queue: The app's queue.
         received: Collects the messages read.
-        until: ``"pipeline"`` quits once the pipeline has finished, as a
-            user would; ``"quit"`` waits until the runner closes the app.
+        until: ``"pipeline"`` quits once ``pipelines`` pipelines have
+            finished, as a user would; ``"started"`` quits as soon as a
+            pipeline starts, mid-call; ``"quit"`` waits until the runner
+            closes the app.
+        pipelines: How many pipelines finish before a ``"pipeline"`` app quits.
     """
 
-    def __init__(self, queue, received, until):
+    def __init__(self, queue, received, until, pipelines: int = 1):
         self._queue = queue
         self._received = received
         self._until = until
+        self._pipelines = pipelines
         self.markers: list = []
         self.terminated = False
 
@@ -404,36 +416,45 @@ class FakeAppProcess:
             message = self._queue.get()
             if isinstance(message, dict):
                 self._received.append(message)
-                if self._until == "pipeline" and message["type"] == "tail-pipeline-finished":
+                if self._until == "started" and message["type"] == "tail-pipeline-started":
                     return
+                if self._until == "pipeline" and message["type"] == "tail-pipeline-finished":
+                    self._pipelines -= 1
+                    if not self._pipelines:
+                        return
                 continue
             self.markers.append(message)
-            if message is not None or self._until == "pipeline":
-                return
+            return
 
     def terminate(self):
         self.terminated = True
 
 
+def fresh_dashboard(monkeypatch, start_app):
+    """A dashboard of its own for a test, whose app is ``start_app(queue)``."""
+    from pipecat_tail import dashboard
+
+    monkeypatch.setattr(dashboard, "DASHBOARD", dashboard._Dashboard())
+    monkeypatch.setattr(dashboard._Dashboard, "start_app", lambda self, queue: start_app(queue))
+
+
 @needs_workers
 @pytest.mark.asyncio
-async def test_tail_runner_feeds_the_app_queue(monkeypatch):
-    """TailRunner attaches observers and feeds the app process through a queue.
+async def test_tail_worker_feeds_the_app_here(monkeypatch):
+    """TailWorker attaches observers and feeds the app process through a queue.
 
     The Textual app needs a terminal, so the app process is replaced by a
     reader that drains the queue until the pipeline is over.
     """
     from pipecat.pipeline.worker import PipelineWorker
 
-    from pipecat_tail.runner import TailRunner
+    from pipecat_tail.worker import TailWorker
 
     logger.remove()
     lines: list[str] = []
     sink = logger.add(lambda line: lines.append(str(line)), level="INFO")
     received: list[dict] = []
-    monkeypatch.setattr(
-        TailRunner, "_start_app", lambda self: FakeAppProcess(self._queue, received, "pipeline")
-    )
+    fresh_dashboard(monkeypatch, lambda queue: FakeAppProcess(queue, received, "pipeline"))
 
     processor = FakeLLM(name="proc")
     worker = PipelineWorker(
@@ -442,8 +463,9 @@ async def test_tail_runner_feeds_the_app_queue(monkeypatch):
         params=PipelineParams(enable_metrics=True),
         idle_timeout_secs=None,
     )
-    runner = TailRunner()
-    await runner.add_workers(worker)
+    runner = WorkerRunner(handle_sigint=False)
+    tail = TailWorker(worker)
+    await runner.add_workers(worker, tail)
     run_task = asyncio.create_task(runner.run())
     try:
         await asyncio.sleep(0.8)
@@ -463,7 +485,7 @@ async def test_tail_runner_feeds_the_app_queue(monkeypatch):
     # No client connects to a queue: the server says it is ready as it starts,
     # or the app would show the bot as disconnected and its state pills off.
     ready = next(m for m in received if m["type"] == "tail-ready")
-    if hasattr(runner.server, "worker_runner"):
+    if hasattr(tail, "worker_runner"):
         # Workers know their runner from Pipecat 1.8.
         assert ready["data"]["runner"] == runner.name
     state = SessionState()
@@ -480,7 +502,7 @@ async def test_tail_runner_feeds_the_app_queue(monkeypatch):
 
 @needs_workers
 @pytest.mark.asyncio
-async def test_tail_runner_closes_the_app_when_cancelled(monkeypatch):
+async def test_tail_worker_closes_the_app_when_the_runner_is_cancelled(monkeypatch):
     """Cancelling run() ends the pipeline and closes the app.
 
     The development runner cancels the bot this way when it shuts down; the
@@ -488,30 +510,96 @@ async def test_tail_runner_closes_the_app_when_cancelled(monkeypatch):
     """
     from pipecat.pipeline.worker import PipelineWorker
 
-    from pipecat_tail.runner import QUIT, TailRunner
+    from pipecat_tail.dashboard import QUIT
+    from pipecat_tail.worker import TailWorker
 
     logger.remove()
     apps: list[FakeAppProcess] = []
 
-    def start_app(self):
-        apps.append(FakeAppProcess(self._queue, [], "quit"))
+    def start_app(queue):
+        apps.append(FakeAppProcess(queue, [], "quit"))
         return apps[-1]
 
-    monkeypatch.setattr(TailRunner, "_start_app", start_app)
+    fresh_dashboard(monkeypatch, start_app)
 
     worker = PipelineWorker(Pipeline([FakeLLM(name="proc")]), name="bot-4", idle_timeout_secs=None)
-    runner = TailRunner()
-    await runner.add_workers(worker)
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker, TailWorker(worker))
     run_task = asyncio.create_task(runner.run())
     await asyncio.sleep(0.8)
     run_task.cancel()
-    with pytest.raises(asyncio.CancelledError):
+    with contextlib.suppress(asyncio.CancelledError):
         await asyncio.wait_for(run_task, 10.0)
     logger.add(lambda _: None)
 
     assert worker.has_finished()
     assert apps[0].markers == [QUIT]
     assert not apps[0].terminated
+
+
+@needs_workers
+@pytest.mark.asyncio
+async def test_closing_the_app_here_stops_the_bot(monkeypatch):
+    """q in the app ends the call: the bot stops and the runner ends."""
+    from pipecat.pipeline.worker import PipelineWorker
+
+    from pipecat_tail.worker import TailWorker
+
+    logger.remove()
+    fresh_dashboard(monkeypatch, lambda queue: FakeAppProcess(queue, [], "started"))
+    worker = PipelineWorker(Pipeline([FakeLLM(name="proc")]), name="bot-8", idle_timeout_secs=None)
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker, TailWorker(worker))
+    await asyncio.wait_for(runner.run(), 10.0)
+    logger.add(lambda _: None)
+    assert worker.has_finished()
+
+
+@needs_workers
+@pytest.mark.asyncio
+async def test_tail_workers_in_one_process_share_one_app(monkeypatch):
+    """A development runner starts the bot, and its runner, for every call.
+
+    The calls report to the app already open, instead of starting another
+    on the same terminal.
+    """
+    from pipecat.pipeline.worker import PipelineWorker
+
+    from pipecat_tail.worker import TailWorker
+
+    logger.remove()
+    apps: list[FakeAppProcess] = []
+    received: list[dict] = []
+
+    def start_app(queue):
+        apps.append(FakeAppProcess(queue, received, "pipeline", pipelines=2))
+        return apps[-1]
+
+    fresh_dashboard(monkeypatch, start_app)
+
+    async def call(name: str) -> asyncio.Task:
+        worker = PipelineWorker(Pipeline([FakeLLM(name="proc")]), name=name, idle_timeout_secs=None)
+        runner = WorkerRunner(handle_sigint=False)
+        await runner.add_workers(worker, TailWorker(worker))
+        task = asyncio.create_task(runner.run())
+        await asyncio.sleep(0.8)
+        await worker.queue_frames(frames("proc"))
+        return task
+
+    first = await call("call-1")
+    for _ in range(100):
+        if any(m["type"] == "tail-pipeline-finished" for m in received):
+            break
+        await asyncio.sleep(0.05)
+    # The first call is over, and its dashboard stays open for the next one.
+    assert not first.done()
+    second = await call("call-2")
+    await asyncio.wait_for(asyncio.gather(first, second), 15.0)
+    logger.add(lambda _: None)
+
+    assert len(apps) == 1
+    started = [m["worker"] for m in received if m["type"] == "tail-pipeline-started"]
+    assert started == ["call-1", "call-2"]
 
 
 def test_audio_level_follows_loudness():
@@ -540,7 +628,7 @@ async def test_a_server_sends_each_log_line_once():
     # one server, each line still reaches the app once.
     from collections import Counter
 
-    from pipecat_tail.server import TailServer
+    from pipecat_tail.worker import TailWorker
 
     logger.remove()
     received: list[dict] = []
@@ -548,13 +636,12 @@ async def test_a_server_sends_each_log_line_once():
     async def on_message(message):
         received.append(message)
 
-    tail = TailServer(sink=CallbackSink(on_message))
-
-    def factory(worker):
+    def make_tail(worker):
+        tail = TailWorker(worker, sink=CallbackSink(on_message))
         worker.add_observer(tail.create_observer(worker))
-        return tail.create_observer(worker)
+        return tail
 
-    await run_pipeline("bot-7", factory, extra_workers=(tail,))
+    await run_pipeline("bot-7", lambda _: None, tail=make_tail)
     logs = [m for m in received if m["type"] == "tail-log"]
     assert logs
     lines = Counter((m["data"]["time"], m["data"]["message"]) for m in logs)
