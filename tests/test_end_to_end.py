@@ -370,6 +370,8 @@ async def test_worker_runner_with_a_tail_worker_serving_the_app():
         assert messages[0]["data"]["runner"] == runner.name
     assert "workers" in messages[0]["data"]["capabilities"]
     assert "standalone" not in messages[0]["data"]
+    # Quitting a Tail elsewhere leaves the bot running.
+    assert "quit_stops_bot" not in messages[0]["data"]
     assert_conversation(types)
     assert_metrics(messages)
     assert "tail-pipeline-started" in types
@@ -489,6 +491,8 @@ async def test_tail_worker_feeds_the_app_here(monkeypatch):
     # The worker says it is ready as it starts, not when the app connects,
     # or the app would show the bot as disconnected and its state pills off.
     ready = next(m for m in received if m["type"] == "tail-ready")
+    # Quitting the app here stops the bot, and the app says so first.
+    assert ready["data"]["quit_stops_bot"] is True
     if hasattr(tail, "worker_runner"):
         # Workers know their runner from Pipecat 1.8.
         assert ready["data"]["runner"] == runner.name

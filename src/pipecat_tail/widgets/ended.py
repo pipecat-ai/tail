@@ -6,17 +6,13 @@
 
 """The dialog that says a call is over, and how it went."""
 
-from rich.console import Group
 from rich.style import Style
 from rich.text import Text
-from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
-from textual.screen import ModalScreen
-from textual.widgets import Button, Static
 
 from pipecat_tail.state import SessionState, WorkerSession
 from pipecat_tail.widgets import palette
+from pipecat_tail.widgets.dialog import Dialog
 from pipecat_tail.widgets.render import fmt_elapsed, fmt_secs
 
 
@@ -55,32 +51,19 @@ def call_summary(state: SessionState, session: WorkerSession) -> list[Text]:
     return lines
 
 
-class CallEnded(ModalScreen):
+class CallEnded(Dialog):
     """Says the call is over, how it went, and what to do next.
 
     ``n`` and ``p`` close it and step back through the turns where something
-    went wrong; Enter or Esc just close it.
-    """
-
-    DEFAULT_CSS = """
-    CallEnded { align: center middle; background: $background 60%; }
-    CallEnded #call-ended {
-        width: 47;
-        max-width: 95%;
-        height: auto;
-        padding: 1 2;
-        border: round $primary;
-        border-title-style: bold;
-        background: $surface;
-    }
-    CallEnded #call-ended-body { height: auto; }
-    CallEnded Button { margin-top: 1; width: 100%; }
+    went wrong; Enter or Esc just close it, and ``q`` asks to quit instead.
     """
 
     BINDINGS = [
-        Binding("escape", "dismiss", "close"),
         Binding("n", "look_back(1)", "next issue"),
         Binding("p", "look_back(-1)", "previous issue"),
+        Binding("s", "app.save_report", "save a report"),
+        Binding("q", "app.request_quit", "quit"),
+        Binding("c", "app.connect", "reconnect"),
     ]
 
     def __init__(self, state: SessionState, session: WorkerSession, *, bot_gone: bool):
@@ -91,34 +74,11 @@ class CallEnded(ModalScreen):
             session: The session whose call ended.
             bot_gone: The bot went away before its pipeline finished.
         """
-        super().__init__()
-        self.title_text = "The bot went away" if bot_gone else "Call ended"
-        p = palette.current()
-        lines = call_summary(state, session)
-        lines.append(Text(""))
-        hints = [("n p", "look back at what went wrong"), ("s", "save a report"), ("q", "quit")]
+        keys = [("n p", "look back at what went wrong"), ("s", "save a report"), ("q", "quit")]
         if bot_gone:
-            hints.append(("c", "reconnect now; Tail also retries"))
-        for key, meaning in hints:
-            line = Text(f"{key:<5}", style=Style(color=p.bright, bold=True))
-            line.append(meaning, style=Style(color=p.muted))
-            lines.append(line)
-        self.body = Group(*lines)
-
-    def compose(self) -> ComposeResult:
-        """Lay out the summary and the button."""
-        with Vertical(id="call-ended") as panel:
-            panel.border_title = self.title_text
-            yield Static(self.body, id="call-ended-body")
-            yield Button("OK", id="call-ended-ok", variant="primary")
-
-    def on_mount(self) -> None:
-        """Enter presses OK."""
-        self.query_one(Button).focus()
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Close the dialog."""
-        self.dismiss()
+            keys.append(("c", "reconnect now; Tail also retries"))
+        title = "The bot went away" if bot_gone else "Call ended"
+        super().__init__(title, call_summary(state, session), keys)
 
     def action_look_back(self, step: int) -> None:
         """Close the dialog and step to the next or previous issue."""

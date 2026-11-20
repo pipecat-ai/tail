@@ -7,6 +7,7 @@ import pytest
 from pipecat_tail import demo
 from pipecat_tail.app import TailApp
 from pipecat_tail.state import Backchannel
+from pipecat_tail.widgets.dialog import QuitDialog
 from pipecat_tail.widgets.inspector import TurnInspector
 from pipecat_tail.widgets.splash import HelpScreen
 from pipecat_tail.widgets.turns import TurnBlock
@@ -608,6 +609,98 @@ async def test_a_dialog_says_the_call_ended_and_how_it_went():
         await pilot.pause(0.3)
         assert not isinstance(app.screen, CallEnded)
         assert app.live.conversation.selected_turn is not None
+
+
+@pytest.mark.asyncio
+async def test_the_call_ended_dialog_takes_the_keys_it_offers():
+    from pipecat_tail.demo import WORKER
+    from pipecat_tail.widgets.ended import CallEnded
+
+    saved = []
+    app = TailApp()
+    app.action_save_report = lambda: saved.append(True)  # type: ignore[method-assign]
+    async with app.run_test(size=(100, 40)) as pilot:
+        await feed(app, pilot)
+        await app.handle_message(
+            {
+                "label": "tail",
+                "type": "tail-pipeline-finished",
+                "worker": WORKER,
+                "timestamp": time.time(),
+            }
+        )
+        await pilot.pause(0.3)
+        assert isinstance(app.screen, CallEnded)
+        await pilot.press("s")
+        await pilot.pause(0.1)
+        assert saved == [True]
+        # q closes it and asks to quit instead; Enter quits.
+        await pilot.press("q")
+        await pilot.pause(0.3)
+        assert isinstance(app.screen, QuitDialog)
+        await pilot.press("enter")
+        await pilot.pause(0.3)
+        assert not app.is_running
+
+
+@pytest.mark.asyncio
+async def test_q_asks_before_quitting():
+    app = TailApp()
+    async with app.run_test(size=(100, 40)) as pilot:
+        await feed(app, pilot)
+        await pilot.press("q")
+        await pilot.pause(0.2)
+        assert isinstance(app.screen, QuitDialog)
+        assert "The session on screen goes away" in as_text(app.screen.body)
+        # Esc stays.
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert not isinstance(app.screen, QuitDialog)
+        assert app.is_running
+        # q twice quits.
+        await pilot.press("q", "q")
+        await pilot.pause(0.3)
+        assert not app.is_running
+
+
+@pytest.mark.asyncio
+async def test_q_quits_at_once_before_a_bot_shows_up():
+    app = TailApp()
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.press("q")
+        await pilot.pause(0.3)
+        assert not app.is_running
+
+
+@pytest.mark.asyncio
+async def test_quitting_in_the_bots_terminal_says_the_bot_stops_while_the_call_is_on():
+    from pipecat_tail.demo import WORKER
+
+    app = TailApp()
+    async with app.run_test(size=(100, 40)) as pilot:
+        await feed(app, pilot)
+        # The bot's own Tail worker says quitting stops it.
+        await app.handle_message(
+            {"label": "tail", "type": "tail-ready", "data": {"quit_stops_bot": True}}
+        )
+        await pilot.press("q")
+        await pilot.pause(0.2)
+        assert "The bot stops too" in as_text(app.screen.body)
+        await pilot.press("escape")
+        await app.handle_message(
+            {
+                "label": "tail",
+                "type": "tail-pipeline-finished",
+                "worker": WORKER,
+                "timestamp": time.time(),
+            }
+        )
+        await pilot.pause(0.3)
+        # Once the call is over there is no bot left to stop.
+        await pilot.press("escape", "q")
+        await pilot.pause(0.2)
+        assert isinstance(app.screen, QuitDialog)
+        assert "The session on screen goes away" in as_text(app.screen.body)
 
 
 @pytest.mark.asyncio

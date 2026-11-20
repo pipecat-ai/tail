@@ -458,6 +458,9 @@ class TailWorker(BaseWorker):
     async def _on_client_connected(self) -> None:
         ready = TailReadyMessage()
         ready.data["capabilities"] = compat.capabilities()
+        if self._here:
+            # Closing the app here stops the bots: the app says so before it quits.
+            ready.data["quit_stops_bot"] = True
         try:
             ready.data["runner"] = self.worker_runner.name
         except (RuntimeError, AttributeError):

@@ -995,6 +995,11 @@ class SessionState:
         return any(s.started_at is not None or s.turns for s in self.sessions.values())
 
     @property
+    def call_on(self) -> bool:
+        """Whether any pipeline's call is still on."""
+        return any(self.call_end(self.sessions[name]) is None for name in self.pipeline_workers)
+
+    @property
     def pipeline_workers(self) -> list[str]:
         """Names of workers that have a session, in first-seen order."""
         return [name for name in self.sessions if name is not None]

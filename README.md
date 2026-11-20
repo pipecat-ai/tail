@@ -70,7 +70,7 @@ Below the top are five views. The key line at the bottom lists the current view'
 
 ### Keys
 
-- Anywhere: `1`–`5` switch views, `?` shows help (starting with what each mark on the screen means), `x` dismisses the error banner, `s` saves a report, `w` switches worker, `t` switches theme, `c` reconnects, `q` quits.
+- Anywhere: `1`–`5` switch views, `?` shows help (starting with what each mark on the screen means), `x` dismisses the error banner, `s` saves a report, `w` switches worker, `t` switches theme, `c` reconnects, `q` quits (asking first once a bot has shown up: `q` again or Enter confirms).
 - Turns, in Live and Latency: `↑` `↓` select a turn, `⏎` inspects it.
 - Live: `n` `p` jump to the next or previous issue, `/` searches what was said, `esc` ends the search, `f` follows or pauses, `+` `-` zoom the voice timeline.
 - Logs: `n` `p` select the next or previous error, `/` searches, `l` cycles the level, `f` follows or pauses. `e`, anywhere, shows the latest error here.
@@ -150,7 +150,7 @@ await runner.add_workers(worker, TailWorker(worker))
 await runner.run()
 ```
 
-It takes several pipeline workers when the runner runs more than one, and `w` switches between them. While the dashboard is open the bot's output is kept off the terminal, and shown there once it closes (output to a file is untouched). Quitting it with `q` stops the bot, and the bot's own log shows it shutting down. When the call ends first, the dashboard stays open until you quit, and under a development runner the next call shows up in it.
+It takes several pipeline workers when the runner runs more than one, and `w` switches between them. While the dashboard is open the bot's output is kept off the terminal, and shown there once it closes (output to a file is untouched). Quitting it with `q` stops the bot, as the quit dialog warns during a call, and the bot's own log shows it shutting down. When the call ends first, the dashboard stays open until you quit, and under a development runner the next call shows up in it.
 
 ## Pipecat versions
 

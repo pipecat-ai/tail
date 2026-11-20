@@ -56,6 +56,7 @@ from pipecat_tail.state import (
     Turn,
 )
 from pipecat_tail.widgets import palette
+from pipecat_tail.widgets.dialog import QuitDialog
 from pipecat_tail.widgets.ended import CallEnded
 from pipecat_tail.widgets.flow import PipelineFlow
 from pipecat_tail.widgets.hud import ErrorBanner, Hud, KeyBar, TitleBar
@@ -223,7 +224,7 @@ class TailApp(App):
         Binding("question_mark", "help", "Help", show=False),
         Binding("c", "connect", "Connect", show=False),
         Binding("s", "save_report", "Save report", show=False),
-        Binding("q", "quit", "Quit", show=False),
+        Binding("q", "request_quit", "Quit", show=False),
     ]
 
     def __init__(
@@ -304,6 +305,29 @@ class TailApp(App):
         self.set_interval(TICK_INTERVAL_SECS, self._tick)
         if self._on_mount:
             await self._on_mount()
+
+    async def action_request_quit(self) -> None:
+        """Quit, asking first once there's a session to lose.
+
+        In the bot's own terminal quitting stops the bot too, and the dialog
+        says so while a call is on.
+        """
+        if not self.state.has_bot:
+            await self.action_quit()
+            return
+        if isinstance(self.screen, QuitDialog):
+            return
+        if isinstance(self.screen, CallEnded):
+            self.screen.dismiss()
+        stops_bot = bool(self.state.info.get("quit_stops_bot")) and self.state.call_on
+        self.push_screen(QuitDialog(stops_bot=stops_bot), callback=self._quit_or_stay)
+
+    async def _quit_or_stay(self, quit: Optional[bool]) -> None:
+        if quit:
+            await self.action_quit()
+        else:
+            # A call that ended while the dialog was up still gets its say.
+            self._show_call_end()
 
     async def action_quit(self) -> None:
         """Write the report if asked to, run the shutdown hook and quit."""
@@ -620,6 +644,9 @@ class TailApp(App):
 
     def _show_call_end(self) -> None:
         """Say once that a call ended, and how it went; a new call closes that."""
+        if isinstance(self.screen, QuitDialog):
+            # One dialog at a time: this one shows if the user stays.
+            return
         session = self.state.selected
         call = (session.name, session.started_at)
         if self.state.call_end(session) is None:
