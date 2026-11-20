@@ -369,10 +369,11 @@ async def test_worker_runner_with_tail_server():
     assert "tail-error" in types
     assert "tail-turn" in types
     assert "tail-log" in types
+    # The runner's bus reaches the app on every Pipecat with workers.
+    assert "tail-bus" in types
     if hasattr(tail, "worker_runner"):
         # Pipecat 1.8+ broadcasts the registry and worker lifecycle on the bus.
         assert "tail-workers" in types or "tail-worker-ready" in types
-        assert "tail-bus" in types
     assert types[-1] == "tail-pipeline-finished"
 
     # Everything from the pipeline is tagged with the worker name.

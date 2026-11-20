@@ -143,6 +143,11 @@ def _bus_payload(message: BusMessage) -> dict[str, Any]:
     return payload
 
 
+def _name(message: BusMessage) -> str:
+    """A bus message's name: Pipecat names them from 1.8, by class and count."""
+    return getattr(message, "name", None) or type(message).__name__
+
+
 class TailServer(BaseWorker):
     """Worker that streams a runner's activity to the Tail app.
 
@@ -301,7 +306,7 @@ class TailServer(BaseWorker):
         try:
             await self._forward_bus_message(message)
         except Exception as e:
-            logger.warning(f"ᓚᘏᗢ Tail: unable to forward bus message {message.name}: {e}")
+            logger.warning(f"ᓚᘏᗢ Tail: unable to forward bus message {_name(message)}: {e}")
         await super().on_bus_message(message)
 
     async def _forward_bus_message(self, message: BusMessage) -> None:
@@ -320,7 +325,7 @@ class TailServer(BaseWorker):
             TailBusMessage(
                 timestamp=now,
                 data={
-                    "name": message.name,
+                    "name": _name(message),
                     "message_type": type(message).__name__,
                     "category": bus_message_category(message),
                     "source": source,
