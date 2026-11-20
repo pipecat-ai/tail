@@ -56,13 +56,20 @@ class PipecatTail:
             url=url,
             report_path=report_path,
         )
+        # Quitting when the connection ends: a bot that's busy for a while
+        # (loading a model, say) mustn't count as gone.
         self._client = TailClient(
-            url, on_message=self._app.handle_message, on_status=self._on_status
+            url,
+            on_message=self._app.handle_message,
+            on_status=self._on_status,
+            reconnect=not exit_on_disconnect,
+            ping_timeout_secs=None if exit_on_disconnect else 20.0,
         )
 
-    async def run(self) -> None:
-        """Run the app until it quits."""
+    async def run(self) -> int:
+        """Run the app until it quits, and return its exit status: 0 unless it crashed."""
         await self._app.run_async()
+        return self._app.return_code or 0
 
     async def _on_mount(self) -> None:
         # The app owns the terminal; keep our own logs out of it.
@@ -79,7 +86,8 @@ class PipecatTail:
     async def _on_status(self, status: str, detail: Optional[str] = None) -> None:
         await self._app.handle_status(status, detail)
         if self._exit_on_disconnect and status in ("disconnected", "error"):
-            self._app.exit()
+            # The bot went away; never reaching it is an error.
+            self._app.exit(return_code=1 if status == "error" else 0)
 
 
 class PipecatTailDemo:
@@ -95,9 +103,10 @@ class PipecatTailDemo:
         self._app = TailApp(on_mount=self._on_mount, on_shutdown=self._on_shutdown, url="demo")
         self._task: Optional[asyncio.Task] = None
 
-    async def run(self) -> None:
-        """Run the app until it quits."""
+    async def run(self) -> int:
+        """Run the app until it quits, and return its exit status: 0 unless it crashed."""
         await self._app.run_async()
+        return self._app.return_code or 0
 
     async def _on_mount(self) -> None:
         logger.remove()
@@ -169,7 +178,8 @@ def cli(
     exit_on_disconnect: bool = typer.Option(
         False,
         "--exit-on-disconnect",
-        help="Quit when the connection to the bot ends, instead of waiting for it to come back",
+        help="Quit when the bot closes the connection or goes away, instead of waiting for it "
+        "to come back; a busy bot doesn't count as gone",
     ),
 ):
     """Pipecat Tail command."""
@@ -195,7 +205,7 @@ def cli(
         if demo
         else PipecatTail(url=url, report_path=report, exit_on_disconnect=exit_on_disconnect)
     )
-    asyncio.run(app.run())
+    raise typer.Exit(asyncio.run(app.run()))
 
 
 if __name__ == "__main__":

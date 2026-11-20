@@ -11,8 +11,11 @@ import contextlib
 import dataclasses
 import json
 import math
+import os
 import socket
 import struct
+import subprocess
+import threading
 
 import pytest
 import websockets
@@ -400,21 +403,35 @@ class FakeAppProcess:
         received: Collects the messages read.
         until: ``"pipeline"`` quits once ``pipelines`` pipelines have
             finished, as a user would; ``"started"`` quits as soon as a
-            pipeline starts, mid-call; ``"quit"`` waits until the runner
-            closes the app.
+            pipeline starts, mid-call; ``"quit"`` waits until its connection
+            ends.
         pipelines: How many pipelines finish before a ``"pipeline"`` app quits.
+        exit_code: Its exit status: 0 for the user quitting, 1 for a crash.
     """
 
-    def __init__(self, url: str, received, until, pipelines: int = 1):
+    def __init__(self, url: str, received, until, pipelines: int = 1, exit_code: int = 0):
         self._url = url
         self._received = received
         self._until = until
         self._pipelines = pipelines
+        self._exit_code = exit_code
+        self._started = threading.Event()
+        self._done = threading.Event()
+        self.returncode = None
         self.ended = False
         self.terminated = False
 
-    def wait(self):
+    def wait(self, timeout=None):
+        # The dashboard may wait again once the connection ends.
+        if self._started.is_set():
+            if not self._done.wait(timeout):
+                raise subprocess.TimeoutExpired("pipecat tail", timeout)
+            return self.returncode
+        self._started.set()
         asyncio.run(self._read())
+        self.returncode = self._exit_code
+        self._done.set()
+        return self.returncode
 
     async def _read(self):
         try:
@@ -437,10 +454,14 @@ class FakeAppProcess:
 
 
 def fresh_dashboard(monkeypatch, start_app):
-    """A dashboard of its own for a test, whose app is ``start_app(url)``."""
+    """A dashboard of its own for a test, whose app is ``start_app(url)``.
+
+    The tests have no terminal; the fake app stands in for one.
+    """
     from pipecat_tail import dashboard
 
     monkeypatch.setattr(dashboard, "DASHBOARD", dashboard._Dashboard())
+    monkeypatch.setattr(dashboard._Dashboard, "can_open", lambda self: True)
     monkeypatch.setattr(dashboard._Dashboard, "start_app", lambda self, url: start_app(url))
 
 
@@ -510,14 +531,15 @@ async def test_tail_worker_feeds_the_app_here(monkeypatch):
 
 @needs_workers
 @pytest.mark.asyncio
-async def test_tail_worker_closes_the_app_when_the_runner_is_cancelled(monkeypatch):
-    """Cancelling run() ends the pipeline and closes the app.
+async def test_a_runner_shut_down_from_outside_leaves_the_app_open(monkeypatch):
+    """Cancelling run() ends the pipeline, and the app stays to read the call.
 
-    The development runner cancels the bot this way when it shuts down; the
-    pipeline and the app must not be left waiting on each other.
+    The app is the process's, shared with other calls: it closes when the
+    process ends, its connection with it, and nothing is left waiting.
     """
     from pipecat.pipeline.worker import PipelineWorker
 
+    from pipecat_tail import dashboard
     from pipecat_tail.worker import TailWorker
 
     logger.remove()
@@ -540,7 +562,13 @@ async def test_tail_worker_closes_the_app_when_the_runner_is_cancelled(monkeypat
     logger.add(lambda _: None)
 
     assert worker.has_finished()
-    # The app saw its connection end and quit by itself.
+    assert not apps[0].ended
+    # The process ending ends the app's connection, and it quits by itself.
+    closed = dashboard.DASHBOARD.closed
+    assert closed is not None
+    closed.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await asyncio.wait_for(closed, 10.0)
     assert apps[0].ended
     assert not apps[0].terminated
 
@@ -561,6 +589,88 @@ async def test_closing_the_app_here_stops_the_bot(monkeypatch):
     await asyncio.wait_for(runner.run(), 10.0)
     logger.add(lambda _: None)
     assert worker.has_finished()
+
+
+@needs_workers
+@pytest.mark.asyncio
+async def test_the_app_crashing_leaves_the_bot_running(monkeypatch):
+    """Only the user quitting stops the bot; a crashed app exits with 1."""
+    from pipecat.pipeline.worker import PipelineWorker
+
+    from pipecat_tail.worker import TailWorker
+
+    logger.remove()
+    fresh_dashboard(monkeypatch, lambda url: FakeAppProcess(url, [], "started", exit_code=1))
+    worker = PipelineWorker(Pipeline([FakeLLM(name="proc")]), name="bot-9", idle_timeout_secs=None)
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker, TailWorker(worker))
+    run_task = asyncio.create_task(runner.run())
+    await asyncio.sleep(1.5)
+    assert not worker.has_finished()
+    await worker.queue_frames(frames("proc"))
+    await asyncio.wait_for(run_task, 10.0)
+    logger.add(lambda _: None)
+
+
+@needs_workers
+def test_without_a_terminal_tail_worker_serves_the_app(monkeypatch):
+    """In a container or with output to a file, the app here couldn't be used."""
+    from pipecat.pipeline.worker import PipelineWorker
+
+    from pipecat_tail import dashboard
+    from pipecat_tail.worker import TailWorker
+
+    monkeypatch.setattr(dashboard, "DASHBOARD", dashboard._Dashboard())
+    monkeypatch.setattr(os, "isatty", lambda fd: False)
+    worker = PipelineWorker(Pipeline([FakeLLM(name="proc")]), name="bot-10", idle_timeout_secs=None)
+    tail = TailWorker(worker)
+    assert tail.url == "ws://localhost:9292"
+
+
+@needs_workers
+@pytest.mark.asyncio
+async def test_one_runner_shutting_down_leaves_other_calls_alone(monkeypatch):
+    """Two calls share the app; one runner shut down from outside doesn't
+    close it, or stop the other call's bot."""
+    from pipecat.pipeline.worker import PipelineWorker
+
+    from pipecat_tail import dashboard
+    from pipecat_tail.worker import TailWorker
+
+    logger.remove()
+    apps: list[FakeAppProcess] = []
+
+    def start_app(url):
+        apps.append(FakeAppProcess(url, [], "quit"))
+        return apps[-1]
+
+    fresh_dashboard(monkeypatch, start_app)
+
+    async def call(name: str):
+        worker = PipelineWorker(Pipeline([FakeLLM(name="proc")]), name=name, idle_timeout_secs=None)
+        runner = WorkerRunner(handle_sigint=False)
+        await runner.add_workers(worker, TailWorker(worker))
+        return worker, asyncio.create_task(runner.run())
+
+    _, first = await call("call-a")
+    second_worker, second = await call("call-b")
+    await asyncio.sleep(1.0)
+    first.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await asyncio.wait_for(first, 10.0)
+    await asyncio.sleep(0.5)
+    assert not second_worker.has_finished()
+    assert len(apps) == 1 and not apps[0].ended
+    await second_worker.queue_frames(frames("proc"))
+    second.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await asyncio.wait_for(second, 10.0)
+    closed = dashboard.DASHBOARD.closed
+    assert closed is not None
+    closed.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await asyncio.wait_for(closed, 10.0)
+    logger.add(lambda _: None)
 
 
 @needs_workers

@@ -160,14 +160,15 @@ class TailWorker(BaseWorker):
 
     It stops once every pipeline worker it reports on has finished. With the
     app in this terminal it stays until the app is closed, so the call can
-    still be read, and closing the app stops the bots it shows.
+    still be read, and quitting the app stops the bots it shows.
 
     Args:
         *workers: The pipeline workers to report on. They get their
             ``TailObserver`` here, before they start; ``create_observer``
             adds more later.
         server: Serve the app on ``host`` and ``port``, for ``pipecat tail``,
-            instead of opening it in this terminal.
+            instead of opening it in this terminal. Without a terminal (in a
+            container, say) it serves it anyway.
         host: Address the server listens on.
         port: Port the server listens on.
         name: Worker name. Defaults to ``tail``.
@@ -190,6 +191,12 @@ class TailWorker(BaseWorker):
         """Initialize the worker. See the class docstring for the arguments."""
         super().__init__(name)
         self._server: Optional[TailWebSocketServer] = None
+        if sink is None and not server and not dashboard.DASHBOARD.can_open():
+            logger.warning(
+                f"ᓚᘏᗢ Tail: no terminal to open the dashboard in, serving it on "
+                f"ws://{host}:{port} for `pipecat tail` instead"
+            )
+            server = True
         # The app in this terminal, shared by the process's workers.
         self._here = sink is None and not server
         if sink is None and server:
@@ -267,9 +274,10 @@ class TailWorker(BaseWorker):
         self._maybe_watch()
 
     async def _stop_bots_when_closed(self) -> None:
-        if self._app_closed is None:
+        # Only the user quitting stops the bots, not the app crashing. The
+        # app is shared: shielded, cancelling this wait leaves it open.
+        if self._app_closed is None or not await asyncio.shield(self._app_closed):
             return
-        await self._app_closed
         running = [w for w in self._observed.values() if not w.has_finished()]
         if running:
             logger.info("ᓚᘏᗢ Tail: closed, stopping the bot")
@@ -277,15 +285,13 @@ class TailWorker(BaseWorker):
             await worker.cancel(reason="Tail closed")
 
     async def stop(self) -> None:
-        """Stop the worker, and its websocket server or the app here.
+        """Stop the worker, and its websocket server.
 
         It stops on its own once its pipelines have finished and the app here
-        is closed. With the app still open, the runner is shutting it down
-        from outside (as a development runner does on Ctrl-C): the app
-        closes too, so nothing is left waiting on it.
+        is closed. The app here is the process's, shared with other calls'
+        workers: a runner shutting this one down leaves it open, and it
+        closes when the user quits it or the process ends.
         """
-        if self._app_closed is not None and not self._app_closed.done():
-            await dashboard.DASHBOARD.close()
         for task in (self._watch_task, self._closing_task):
             if task is not None and not task.done() and task is not asyncio.current_task():
                 task.cancel()
@@ -333,7 +339,7 @@ class TailWorker(BaseWorker):
                         pass
         if self._app_closed is not None:
             # The call can still be read: stay until the app is closed.
-            await self._app_closed
+            await asyncio.shield(self._app_closed)
         logger.debug("ᓚᘏᗢ Tail: all observed pipelines finished, stopping")
         self._watch_task = None
         await self.stop()

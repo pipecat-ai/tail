@@ -32,6 +32,8 @@ class TailClient:
         on_message: Called with every decoded message.
         on_status: Called when the connection state changes.
         reconnect: Whether to reconnect after a drop or a failed attempt.
+        ping_timeout_secs: How long the server may take to answer a ping
+            before the connection counts as gone; None waits on a busy bot.
         min_backoff_secs: First retry delay.
         max_backoff_secs: Longest retry delay.
     """
@@ -43,6 +45,7 @@ class TailClient:
         on_message: MessageHandler,
         on_status: Optional[StatusHandler] = None,
         reconnect: bool = True,
+        ping_timeout_secs: Optional[float] = 20.0,
         min_backoff_secs: float = 0.5,
         max_backoff_secs: float = 10.0,
     ):
@@ -51,6 +54,7 @@ class TailClient:
         self._on_message = on_message
         self._on_status = on_status
         self._reconnect = reconnect
+        self._ping_timeout = ping_timeout_secs
         self._min_backoff = min_backoff_secs
         self._max_backoff = max_backoff_secs
         self._task: Optional[asyncio.Task] = None
@@ -112,7 +116,9 @@ class TailClient:
         while True:
             await self._status("connecting", self._url)
             try:
-                async with websockets.connect(self._url, max_size=None) as ws:
+                async with websockets.connect(
+                    self._url, max_size=None, ping_timeout=self._ping_timeout
+                ) as ws:
                     self._ws = ws
                     self._connected = True
                     backoff = self._min_backoff

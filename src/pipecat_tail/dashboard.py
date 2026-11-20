@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from pipecat_tail.messages import TailMessage
 
 APP_QUIT_TIMEOUT_SECS = 5.0
-"""How long the app gets to close when asked before its process is terminated."""
+"""How long the app gets to quit once its connection ends before it's terminated."""
 
 
 class _TerminalOutput:
@@ -52,12 +52,14 @@ class _TerminalOutput:
 
     def hide(self):
         """Send stdout and stderr to a file while they are a terminal."""
+        terminals = [fd for fd in (1, 2) if os.isatty(fd)]
+        if not terminals:
+            return
         self._flush()
         self._kept = tempfile.TemporaryFile()
-        for fd in (1, 2):
-            if os.isatty(fd):
-                self._saved.append((fd, os.dup(fd)))
-                os.dup2(self._kept.fileno(), fd)
+        for fd in terminals:
+            self._saved.append((fd, os.dup(fd)))
+            os.dup2(self._kept.fileno(), fd)
 
     def restore(self):
         """Point stdout and stderr back at the terminal, and show what they wrote."""
@@ -90,25 +92,29 @@ class _Dashboard:
 
     A development runner starts the bot again for every call, each time with
     a ``TailWorker`` of its own. They all report to the one app, which stays
-    open from call to call until it's closed: two apps would fight over the
-    terminal.
+    open from call to call until the user quits it or the bot's process ends:
+    two apps would fight over the terminal.
     """
 
     def __init__(self):
         self.server: Optional[TailWebSocketServer] = None
-        self.process: Optional[subprocess.Popen] = None
         self.closed: Optional[asyncio.Task] = None
         self.output = _TerminalOutput()
+
+    def can_open(self) -> bool:
+        """Whether there's a terminal to show the app in: it's open, or could be."""
+        is_open = self.closed is not None and not self.closed.done()
+        return is_open or (os.isatty(0) and os.isatty(1))
 
     def open(self, log_level: str) -> asyncio.Task:
         """Open the app unless it is, and return what ends when it closes.
 
         The app gets the process's logs from ``log_level`` up, once, however
         many workers report to it. What's sent before it connects waits for it.
+        The task's result is whether the user quit it, rather than it crashing.
         """
         if self.closed is None or self.closed.done():
             self.server = TailWebSocketServer(host="127.0.0.1", port=0)
-            self.process = None
             self.closed = asyncio.create_task(self._show(self.server, log_level))
         return self.closed
 
@@ -117,33 +123,28 @@ class _Dashboard:
         command = [sys.executable, "-m", "pipecat_tail.cli", "--url", url, "--exit-on-disconnect"]
         return subprocess.Popen(command)
 
-    async def _show(self, server: TailWebSocketServer, log_level: str) -> None:
+    async def _show(self, server: TailWebSocketServer, log_level: str) -> bool:
         from pipecat_tail.observer import forward_logs, stop_forwarding_logs
 
         logs = forward_logs(self._send_log, log_level)
+        process = None
         try:
             await server.start()
-            self.process = self.start_app(server.url)
+            process = self.start_app(server.url)
             self.output.hide()
-            await asyncio.to_thread(self.process.wait)
+            await asyncio.to_thread(process.wait)
         finally:
+            # The app quits once its connection ends, as when the bot's
+            # process shuts down while it's open.
             stop_forwarding_logs(logs)
             await server.stop()
             self.server = None
+            if process is not None:
+                await asyncio.to_thread(_end, process)
             # The terminal is the bot's again: show what it wrote meanwhile.
             self.output.restore()
-
-    async def close(self) -> None:
-        """Ask the app to close, and end its process if it doesn't."""
-        if self.closed is None or self.closed.done():
-            return
-        if self.server is not None:
-            # The app quits when its connection ends.
-            await self.server.stop()
-        await asyncio.wait([self.closed], timeout=APP_QUIT_TIMEOUT_SECS)
-        if not self.closed.done() and self.process is not None:
-            self.process.terminate()
-            await asyncio.wait([self.closed])
+        # Quitting exits with 0; a crash doesn't.
+        return process is not None and process.returncode == 0
 
     async def emit(self, message: dict) -> None:
         """Deliver a message to the app that is open."""
@@ -152,6 +153,15 @@ class _Dashboard:
 
     async def _send_log(self, model: "TailMessage") -> None:
         await self.emit(model.model_dump(mode="json", exclude_none=True))
+
+
+def _end(process: subprocess.Popen) -> None:
+    """Wait for the app to quit, and terminate it if it doesn't."""
+    try:
+        process.wait(APP_QUIT_TIMEOUT_SECS)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        process.wait()
 
 
 DASHBOARD = _Dashboard()
