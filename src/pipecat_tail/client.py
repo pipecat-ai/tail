@@ -61,6 +61,9 @@ class TailClient:
         self._ws = None
         self._connected = False
         self._wake = asyncio.Event()
+        # The server's run and the last message seen from it.
+        self._server_run: Optional[str] = None
+        self._seq = 0
 
     @property
     def url(self) -> str:
@@ -109,6 +112,16 @@ class TailClient:
         if self._on_status:
             await self._on_status(status, detail)
 
+    def _seen(self, message: dict[str, Any]) -> bool:
+        """Whether a server that is replaying sent this message already."""
+        run, seq = message.get("run"), message.get("seq")
+        if not isinstance(seq, int):
+            return False
+        if run == self._server_run and seq <= self._seq:
+            return True
+        self._server_run, self._seq = run, seq
+        return False
+
     async def _deliver(self, message: dict[str, Any]) -> None:
         # One message the handler fails on mustn't end the connection.
         try:
@@ -138,7 +151,7 @@ class TailClient:
                         except json.JSONDecodeError:
                             logger.warning("ᓚᘏᗢ Tail: dropping undecodable message")
                             continue
-                        if isinstance(message, dict):
+                        if isinstance(message, dict) and not self._seen(message):
                             await self._deliver(message)
             except asyncio.CancelledError:
                 raise

@@ -495,7 +495,6 @@ def test_context_messages_fold_by_start_index():
             {
                 "llm": "llm",
                 "messages": 2,
-                "start": 0,
                 "items": [{"role": "system", "text": "Be brief."}, {"role": "user", "text": "hi"}],
                 "system": "You are Ada.",
                 "tool_schemas": [{"name": "get_weather", "parameters": {}}],
@@ -511,13 +510,9 @@ def test_context_messages_fold_by_start_index():
     # The summary keeps the counts, not the messages.
     assert "items" not in session.context
 
-    state.apply(
-        tail("tail-llm-context", {"start": 2, "items": [{"role": "assistant", "text": "x"}]})
-    )
-    assert len(session.context_items) == 3
-    # A rewritten context replaces everything from ``start`` on.
-    state.apply(tail("tail-llm-context", {"start": 1, "items": [{"role": "user", "text": "y"}]}))
-    assert [i["text"] for i in session.context_items] == ["Be brief.", "y"]
+    # Every context comes whole, and replaces the last.
+    state.apply(tail("tail-llm-context", {"items": [{"role": "user", "text": "y"}]}))
+    assert [i["text"] for i in session.context_items] == ["y"]
 
 
 def test_events_are_kept_without_audio_levels():
@@ -753,3 +748,21 @@ def test_a_new_call_takes_over_from_one_that_is_over():
     state.apply(tail("tail-pipeline-finished", worker="call-1"))
     state.apply(tail("tail-pipeline-started", {}, worker="call-2"))
     assert state.selected_worker == "call-2"
+
+
+def test_a_worker_that_starts_again_is_a_restarted_bot():
+    """`pipecat tail` outlives the bot: a bot that restarts reuses the worker
+    names, and its new run must not be mixed with the last one."""
+    state = SessionState()
+    started = tail("tail-pipeline-started", {"processors": ["stt", "llm"]})
+    state.apply({**started, "timestamp": 100.0})
+    state.apply(rtvi("user-started-speaking", timestamp=101.0))
+    first = state.selected
+    assert first.speech
+    # The same message again, replayed to a client coming back, changes nothing.
+    state.apply({**started, "timestamp": 100.0})
+    assert state.selected is first and first.speech
+    # The worker starting again is a new run, from scratch.
+    state.apply({**started, "timestamp": 200.0})
+    assert state.selected is not first
+    assert state.selected.started_at == 200.0 and not state.selected.speech

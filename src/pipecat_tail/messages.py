@@ -220,10 +220,9 @@ class TailLLMContextMessage(TailMessage):
 
     ``data`` carries ``llm`` (the receiving processor), ``messages``,
     ``roles`` (messages per role), ``characters``, ``images`` and ``tools``
-    (names), plus the messages themselves: ``items`` holds the messages from
-    index ``start`` on, everything before having been sent already (see
-    ``pipecat_tail.context``). ``system`` (the LLM's system instruction) and
-    ``tool_schemas`` come only when they changed.
+    (names), plus the whole context: ``items`` (the messages, see
+    ``pipecat_tail.context``), ``system`` (the LLM's system instruction) and
+    ``tool_schemas``.
     """
 
     type: Literal["tail-llm-context"] = "tail-llm-context"

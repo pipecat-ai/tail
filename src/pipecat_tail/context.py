@@ -237,40 +237,38 @@ def system_instruction(llm: Any) -> Optional[str]:
 
 
 class ContextTracker:
-    """Remembers what was sent of each LLM's context, to send only what changed."""
+    """Builds each LLM context's message, rendering only the new messages.
+
+    The context goes whole every time, so a client that connects late, or
+    missed one, still shows it right. Messages already rendered are reused:
+    an image is thumbnailed once.
+    """
 
     def __init__(self):
         """Create an empty tracker."""
-        self._sent: dict[str, list[tuple]] = {}
-        self._system: dict[str, Optional[str]] = {}
-        self._tools: dict[str, str] = {}
+        self._prints: dict[str, list[tuple]] = {}
+        self._items: dict[str, list[dict[str, Any]]] = {}
 
     def update(self, llm_name: str, llm: Any, context: Any) -> dict[str, Any]:
         """Build the message data for a context about to go to an LLM.
 
         Returns:
-            The summary counts and tool names (as before), plus ``start`` and
-            ``items``, the messages from ``start`` on; ``system`` and
-            ``tool_schemas`` when they changed since the last time.
+            The summary counts and tool names, the messages as ``items``, the
+            LLM's ``system`` instruction and the ``tool_schemas``.
         """
         try:
             messages = list(context.get_messages())
         except Exception:
             messages = list(getattr(context, "messages", None) or [])
         prints = [fingerprint(m) for m in messages]
-        start = changed_from(self._sent.get(llm_name, []), prints)
-        self._sent[llm_name] = prints
+        start = changed_from(self._prints.get(llm_name, []), prints)
+        items = self._items.get(llm_name, [])[:start] + [item(m) for m in messages[start:]]
+        self._prints[llm_name] = prints
+        self._items[llm_name] = items
         data: dict[str, Any] = {"llm": llm_name, **summary(messages)}
         schemas = tool_schemas(getattr(context, "tools", None))
         data["tools"] = [s["name"] for s in schemas]
-        data["start"] = start
-        data["items"] = [item(m) for m in messages[start:]]
-        system = system_instruction(llm)
-        if system != self._system.get(llm_name):
-            self._system[llm_name] = system
-            data["system"] = system or ""
-        tools_key = _jsonish(schemas)
-        if tools_key != self._tools.get(llm_name):
-            self._tools[llm_name] = tools_key
-            data["tool_schemas"] = schemas
+        data["items"] = items
+        data["system"] = system_instruction(llm) or ""
+        data["tool_schemas"] = schemas
         return data

@@ -27,7 +27,7 @@ class FakeTools:
         self.standard_tools = [FakeTool(n) for n in names]
 
 
-def test_tracker_sends_only_new_messages():
+def test_tracker_sends_the_whole_context_rendering_only_new_messages():
     messages = [
         {"role": "system", "content": "Be brief."},
         {"role": "user", "content": "weather in Lisbon?"},
@@ -36,7 +36,6 @@ def test_tracker_sends_only_new_messages():
     tracker = context.ContextTracker()
 
     first = tracker.update("llm", None, ctx)
-    assert first["start"] == 0
     assert [i["role"] for i in first["items"]] == ["system", "user"]
     assert first["messages"] == 2 and first["roles"] == {"system": 1, "user": 1}
     assert first["tool_schemas"][0]["name"] == "get_weather"
@@ -56,16 +55,20 @@ def test_tracker_sends_only_new_messages():
     )
     messages.append({"role": "tool", "tool_call_id": "call_1", "content": '{"sky": "sunny"}'})
     second = tracker.update("llm", None, ctx)
-    assert second["start"] == 2
-    assert second["items"][0]["tool_calls"][0]["name"] == "get_weather"
-    assert second["items"][1]["tool_call_id"] == "call_1"
-    # Unchanged tools and system instruction aren't sent again.
-    assert "tool_schemas" not in second and "system" not in second
+    # The whole context again, so a client that missed the first still has it.
+    assert len(second["items"]) == 4
+    assert second["items"][2]["tool_calls"][0]["name"] == "get_weather"
+    assert second["items"][3]["tool_call_id"] == "call_1"
+    assert second["tool_schemas"] == first["tool_schemas"] and "system" in second
+    # What was already rendered is reused.
+    assert second["items"][0] is first["items"][0]
 
-    # An edited message resends from there.
+    # An edited message is rendered again, and what follows it.
     messages[1] = {"role": "user", "content": "weather in Porto?"}
     third = tracker.update("llm", None, ctx)
-    assert third["start"] == 1 and len(third["items"]) == 3
+    assert third["items"][0] is first["items"][0]
+    assert third["items"][1] is not second["items"][1]
+    assert "Porto" in third["items"][1]["text"]
 
 
 def test_images_become_small_thumbnails():
@@ -100,4 +103,5 @@ def test_system_instruction_comes_from_the_llm_settings():
     tracker = context.ContextTracker()
     data = tracker.update("llm", LLM(), FakeContext([]))
     assert data["system"] == "You are a travel assistant."
-    assert "system" not in tracker.update("llm", LLM(), FakeContext([]))
+    # It comes with every context, like the rest.
+    assert tracker.update("llm", LLM(), FakeContext([]))["system"] == "You are a travel assistant."

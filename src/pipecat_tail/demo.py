@@ -377,22 +377,16 @@ class _Writer:
         self.speaking_bot: list[tuple[float, float]] = []
         self.messages = 2
         self.context: list[dict[str, Any]] = []
-        self.context_sent = 0
-        self.context_meta_sent = False
 
     def _send_context(self, t: float) -> None:
-        """Send the LLM context as the observer would: only what changed."""
+        """Send the LLM context as the observer would: whole."""
         from pipecat_tail import context as ctx
 
         data: dict[str, Any] = {"llm": LLM, **ctx.summary(self.context)}
         data["tools"] = [schema["name"] for schema in TOOL_SCHEMAS]
-        data["start"] = self.context_sent
-        data["items"] = [ctx.item(m) for m in self.context[self.context_sent :]]
-        if not self.context_meta_sent:
-            data["system"] = SYSTEM_PROMPT
-            data["tool_schemas"] = TOOL_SCHEMAS
-            self.context_meta_sent = True
-        self.context_sent = len(self.context)
+        data["items"] = [ctx.item(m) for m in self.context]
+        data["system"] = SYSTEM_PROMPT
+        data["tool_schemas"] = TOOL_SCHEMAS
         self.tl.tail(t, "tail-llm-context", data)
 
     # Session start

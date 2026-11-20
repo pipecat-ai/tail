@@ -597,9 +597,7 @@ async def test_a_dialog_says_the_call_ended_and_how_it_went():
         assert not isinstance(app.screen, CallEnded)
 
         # The next call: the bot goes away mid-call this time.
-        await app.handle_status("connected")
-        await app.handle_message(pipeline("tail-pipeline-started"))
-        await pilot.pause(0.2)
+        await feed(app, pilot)
         await app.handle_status("disconnected")
         await pilot.pause(0.3)
         assert isinstance(app.screen, CallEnded)
@@ -641,6 +639,28 @@ async def test_the_call_ended_dialog_takes_the_keys_it_offers():
         await pilot.press("enter")
         await pilot.pause(0.3)
         assert not app.is_running
+
+
+@pytest.mark.asyncio
+async def test_the_views_follow_a_restarted_bot():
+    from pipecat_tail.demo import WORKER
+
+    app = TailApp()
+    async with app.run_test(size=(100, 40)) as pilot:
+        await feed(app, pilot)
+        old = app.state.selected
+        assert old.turns
+        await app.handle_message(
+            {
+                "label": "tail",
+                "type": "tail-pipeline-started",
+                "worker": WORKER,
+                "timestamp": time.time() + 60,
+            }
+        )
+        await pilot.pause(0.2)
+        assert app.state.selected is not old
+        assert app.live.conversation.session is app.state.selected
 
 
 @pytest.mark.asyncio

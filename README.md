@@ -200,7 +200,7 @@ pipecat tail
 
 ## Reconnecting
 
-The standalone app reconnects on its own with backoff when the bot restarts. Press `c` to retry immediately.
+The standalone app reconnects on its own with backoff when the bot restarts. Press `c` to retry immediately. A Tail that connects late, or again, gets the call as it is: the latest messages and everything they build on, like the pipeline's startup and the LLM context. A restarted bot starts a fresh session.
 
 ## Metrics
 

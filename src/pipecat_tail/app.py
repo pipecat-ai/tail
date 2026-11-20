@@ -404,6 +404,7 @@ class TailApp(App):
         last_bus = _newest(self.state.bus)
         last_log = _newest(self.state.logs)
         before_workers = set(self.state.sessions)
+        before_selected = self.state.sessions.get(self.state.selected_worker)
         areas = self.state.apply(message)
         if not areas:
             return
@@ -414,8 +415,9 @@ class TailApp(App):
             self._new_logs.append(self.state.logs[-1])
         if set(self.state.sessions) != before_workers:
             areas |= {WORKERS, STRIP, FLOW}
-            if len(before_workers) == 0 or self.state.selected_worker not in before_workers:
-                self._bind_session()
+        # Another session is in view: a new call, or a bot that restarted.
+        if self.state.sessions.get(self.state.selected_worker) is not before_selected:
+            self._bind_session()
         self._dirty |= areas
 
     async def handle_status(self, status: str, detail: Optional[str] = None) -> None:

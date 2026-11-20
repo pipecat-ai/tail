@@ -226,7 +226,7 @@ async def test_observer_with_callback_sink():
     context = next(m for m in received if m["type"] == "tail-llm-context")
     assert context["data"]["messages"] == 2
     assert context["data"]["roles"] == {"system": 1, "user": 1}
-    assert context["data"]["start"] == 0
+    assert context["data"]["system"] == ""
     assert [i["text"] for i in context["data"]["items"]] == [
         "You are a helpful assistant.",
         "hello there",
@@ -357,10 +357,12 @@ async def test_standalone_observer_serves_a_websocket():
     assert reader is not None
     messages = await reader
     types = [m["type"] for m in messages]
-    assert types[0] == "tail-ready"
-    assert "capabilities" in messages[0]["data"]
+    # What the client missed comes first, in order, then the ready message.
+    assert [m["seq"] for m in messages] == sorted(m["seq"] for m in messages)
+    ready = next(m for m in messages if m["type"] == "tail-ready")
+    assert "capabilities" in ready["data"]
     # On its own the observer can't report the runner, and says so.
-    assert messages[0]["data"]["standalone"] is True
+    assert ready["data"]["standalone"] is True
     assert_conversation(types)
     assert types[-1] == "tail-pipeline-finished"
 
@@ -393,11 +395,11 @@ async def test_worker_runner_with_a_tail_worker_serving_the_app():
     messages = await reader
 
     types = [m["type"] for m in messages]
-    assert types[0] == "tail-ready"
+    ready = next(m for m in messages if m["type"] == "tail-ready")
     if hasattr(tail, "worker_runner"):
-        assert messages[0]["data"]["runner"] == runner.name
-    assert "workers" in messages[0]["data"]["capabilities"]
-    assert "standalone" not in messages[0]["data"]
+        assert ready["data"]["runner"] == runner.name
+    assert "workers" in ready["data"]["capabilities"]
+    assert "standalone" not in ready["data"]
     # Quitting a Tail elsewhere leaves the bot running.
     assert "quit_stops_bot" not in messages[0]["data"]
     assert_conversation(types)

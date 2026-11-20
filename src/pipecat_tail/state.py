@@ -1144,6 +1144,13 @@ class SessionState:
                 self.status_detail = None
                 return {STATUS, STRIP, WORKERS}
             case "tail-pipeline-started":
+                session = self.sessions.get(worker)
+                if session is not None and session.started_at not in (None, timestamp):
+                    # The worker started again: the bot restarted under the
+                    # same names. Its last run doesn't belong to this one.
+                    self.sessions[worker] = WorkerSession(worker)
+                    if worker is not None:
+                        self.workers.pop(worker, None)
                 session = self.session(worker)
                 if self.selected is not session and self.selected.finished:
                     # A new call takes over from one that is over.
@@ -1580,11 +1587,9 @@ class SessionState:
     def _apply_llm_context(self, session: WorkerSession, data: dict[str, Any]) -> set[Area]:
         summary = {k: v for k, v in data.items() if k not in ("items", "system", "tool_schemas")}
         session.context = summary
-        start = data.get("start")
         items = data.get("items")
-        if isinstance(start, int) and isinstance(items, list):
-            kept = session.context_items[: max(0, start)]
-            session.context_items = kept + [i for i in items if isinstance(i, dict)]
+        if isinstance(items, list):
+            session.context_items = [i for i in items if isinstance(i, dict)]
         if "system" in data:
             system = data.get("system")
             session.system_instruction = system if isinstance(system, str) and system else None

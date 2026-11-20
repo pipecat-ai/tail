@@ -9,15 +9,16 @@
 A sink is anything with an ``async emit(message: dict)`` method. Tail ships
 two:
 
-- ``TailWebSocketServer`` serves one Tail client over a websocket. Messages
-  produced before a client connects are buffered and replayed to the first
-  client so it sees the session from the start.
+- ``TailWebSocketServer`` serves one Tail client over a websocket. Every
+  client that connects, late or again, gets the latest messages and the
+  state from before them, so it shows the session as it is.
 - ``CallbackSink`` calls a coroutine. ``TailWorker`` feeds the app with it, and
   tests and embedders use it.
 """
 
 import asyncio
 import json
+import uuid
 from collections import deque
 from typing import Any, Awaitable, Callable, Deque, Optional, Protocol
 
@@ -26,6 +27,19 @@ from loguru import logger
 DEFAULT_HOST = "localhost"
 DEFAULT_PORT = 9292
 DEFAULT_BUFFER_SIZE = 5000
+
+PINNED_TYPES = frozenset(
+    {
+        "tail-ready",
+        "tail-pipeline-started",
+        "tail-pipeline-finished",
+        "tail-startup",
+        "tail-transport-timing",
+        "tail-llm-context",
+        "tail-workers",
+    }
+)
+"""Messages that hold state: the latest of each, per worker, outlives the buffer."""
 
 
 class TailSink(Protocol):
@@ -61,6 +75,12 @@ class TailWebSocketServer:
 
     The server is started with ``start()`` and stopped with ``stop()``. It can
     be embedded in an observer (standalone mode) or in a worker (runner mode).
+
+    A client that connects, the first, a late one or one coming back, gets
+    the latest ``buffer_size`` messages, and before them the latest of each
+    kind that holds state (``PINNED_TYPES``): how the pipeline started, the
+    LLM context, the workers. Every message carries the server's ``run`` and
+    a ``seq`` number, so a client coming back skips what it already has.
     """
 
     def __init__(
@@ -76,20 +96,22 @@ class TailWebSocketServer:
         Args:
             host: Address to bind to.
             port: Port to bind to; 0 takes a free one.
-            buffer_size: How many messages to keep for a client that connects
-                late. The oldest messages are dropped first.
+            buffer_size: How many of the latest messages a client gets when it
+                connects. The oldest messages are dropped first.
             on_client_connected: Called after the buffered messages have been
                 replayed to a new client.
         """
         self._host = host
         self._port = port
-        self._buffer: Deque[str] = deque(maxlen=buffer_size)
+        self._recent: Deque[tuple[int, str]] = deque(maxlen=buffer_size)
+        self._pinned: dict[tuple[Any, str], tuple[int, str]] = {}
+        self._run = uuid.uuid4().hex[:12]
+        self._seq = 0
         self._on_client_connected = on_client_connected
         self._client = None
         self._server = None
         self._send_queue: Optional[asyncio.Queue] = None
         self._send_task: Optional[asyncio.Task] = None
-        self._first_client_seen = False
 
     @property
     def url(self) -> str:
@@ -138,12 +160,22 @@ class TailWebSocketServer:
             self._server = None
 
     async def emit(self, message: dict[str, Any]) -> None:
-        """Queue one message for the client, buffering it if none is connected."""
+        """Queue one message for the client, and keep it for the next."""
+        self._seq += 1
+        message = {**message, "run": self._run, "seq": self._seq}
         encoded = json.dumps(message, separators=(",", ":"), default=str)
-        if not self._first_client_seen:
-            self._buffer.append(encoded)
+        self._recent.append((self._seq, encoded))
+        kind = message.get("type")
+        if kind in PINNED_TYPES:
+            self._pinned[(message.get("worker"), kind)] = (self._seq, encoded)
         if self._client and self._send_queue:
             self._send_queue.put_nowait(encoded)
+
+    def _replay(self) -> list[str]:
+        """The latest messages, after the state messages that fell out of them."""
+        oldest = self._recent[0][0] if self._recent else self._seq + 1
+        pinned = sorted(p for p in self._pinned.values() if p[0] < oldest)
+        return [encoded for _, encoded in pinned + list(self._recent)]
 
     async def _send_task_handler(self) -> None:
         assert self._send_queue
@@ -170,19 +202,13 @@ class TailWebSocketServer:
         logger.debug(f"ᓚᘏᗢ Tail: client connected {client.remote_address}")
         try:
             self._client = client
-            # The ready message goes first, then whatever the first client
-            # missed, all through the send queue so the order holds. Nothing
-            # is buffered once a client has been seen, or the ready message
-            # would go out twice.
-            first = not self._first_client_seen
-            self._first_client_seen = True
+            # What the client missed goes first, through the send queue so
+            # the order holds, and what's new after it.
+            assert self._send_queue
+            for encoded in self._replay():
+                self._send_queue.put_nowait(encoded)
             if self._on_client_connected:
                 await self._on_client_connected()
-            if first:
-                assert self._send_queue
-                for encoded in self._buffer:
-                    self._send_queue.put_nowait(encoded)
-                self._buffer.clear()
             async for _ in client:
                 pass
         except Exception as e:
