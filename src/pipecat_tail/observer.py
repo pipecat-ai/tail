@@ -292,10 +292,23 @@ class _RTVIBridge(RTVIObserver):
         await self._owner.send_rtvi_message(model, exclude_none)
 
 
-def _without_audio_levels(params: RTVIObserverParams) -> RTVIObserverParams:
-    # Tail measures audio levels itself (see ``audio_level``).
+def _for_tail(params: RTVIObserverParams) -> RTVIObserverParams:
+    """The RTVI settings Tail needs, whatever settings it was given.
+
+    Tail measures audio levels itself (see ``audio_level``). From Pipecat
+    1.13 it reads the user's words and the bot's text from ``user-input``
+    and the raw text messages, and drops the older ones that repeat them, so
+    those have to be on.
+    """
+    needed = {
+        "user_audio_level_enabled": False,
+        "bot_audio_level_enabled": False,
+        "user_input_enabled": True,
+        "llm_raw_text_enabled": True,
+        "tts_raw_text_enabled": True,
+    }
     return dataclasses.replace(
-        params, user_audio_level_enabled=False, bot_audio_level_enabled=False
+        params, **{k: v for k, v in needed.items() if k in compat.RTVI_PARAMS}
     )
 
 
@@ -313,7 +326,8 @@ class TailObserver(BaseObserver):
             observer finds the worker as its pipeline is set up.
         params: RTVI settings for the messages Tail receives. Defaults to
             ``default_rtvi_params()``. Audio levels are always Tail's own;
-            ``audio_level_period_secs`` sets how often they are sent.
+            ``audio_level_period_secs`` sets how often they are sent. The
+            messages Tail reads the conversation from stay on.
         log_level: Minimum loguru level forwarded as log messages, or None to
             leave the logs to whoever owns the connection: a ``TailWorker``
             forwards them once for all its pipelines.
@@ -336,7 +350,7 @@ class TailObserver(BaseObserver):
         """Initialize the observer. See the class docstring for the arguments."""
         super().__init__()
         params = params or default_rtvi_params()
-        self._rtvi = _RTVIBridge(self, _without_audio_levels(params), **kwargs)
+        self._rtvi = _RTVIBridge(self, _for_tail(params), **kwargs)
         self._level_period = params.audio_level_period_secs
         self._user_level = _Level()
         self._bot_level = _Level()

@@ -664,6 +664,17 @@ async def test_the_views_follow_a_restarted_bot():
 
 
 @pytest.mark.asyncio
+async def test_the_report_is_written_however_the_app_ends(tmp_path):
+    """`--exit-on-disconnect` ends the app without quitting it."""
+    path = tmp_path / "call.md"
+    app = TailApp(report_path=path)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await feed(app, pilot)
+        app.exit()
+    assert path.read_text().startswith("# Tail report")
+
+
+@pytest.mark.asyncio
 async def test_q_asks_before_quitting():
     app = TailApp()
     async with app.run_test(size=(100, 40)) as pilot:

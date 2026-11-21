@@ -250,6 +250,24 @@ async def test_observer_with_callback_sink():
 
 
 @pytest.mark.asyncio
+async def test_rtvi_params_of_your_own_keep_the_conversation():
+    """Pipecat leaves the raw text messages off by default; Tail drops the
+    older messages they replace from 1.13, and would lose the bot's text."""
+    logger.remove()
+    received: list[dict] = []
+
+    async def on_message(message):
+        received.append(message)
+
+    params = compat.rtvi_params()
+    await run_pipeline(
+        "bot-12", lambda _: TailObserver(sink=CallbackSink(on_message), params=params)
+    )
+    logger.add(lambda _: None)
+    assert_conversation([m["type"] for m in received])
+
+
+@pytest.mark.asyncio
 async def test_an_error_in_the_observer_never_reaches_pipecat(monkeypatch):
     """Tail skips the frame it failed on and goes on with the call.
 

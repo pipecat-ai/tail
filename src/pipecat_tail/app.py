@@ -330,7 +330,16 @@ class TailApp(App):
             self._show_call_end()
 
     async def action_quit(self) -> None:
-        """Write the report if asked to, run the shutdown hook and quit."""
+        """Run the shutdown hook and quit."""
+        if self._on_shutdown:
+            await self._on_shutdown()
+        await super().action_quit()
+
+    def on_unmount(self) -> None:
+        """Write the report if asked to, however the app ends.
+
+        Quitting is one way; `--exit-on-disconnect` ends it when the bot goes.
+        """
         if self._report_path is not None and self.state.has_bot:
             from pipecat_tail.report import write_report
 
@@ -338,9 +347,6 @@ class TailApp(App):
                 write_report(self.state, self._report_path)
             except OSError:
                 pass
-        if self._on_shutdown:
-            await self._on_shutdown()
-        await super().action_quit()
 
     def _on_theme_changed(self, theme) -> None:
         palette.use_dark(theme.dark)
