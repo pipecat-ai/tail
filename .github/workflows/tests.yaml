@@ -1,0 +1,55 @@
+name: tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - "**"
+
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: "Tests (Python ${{ matrix.python }}, pipecat ${{ matrix.pipecat }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12"]
+        # Tail supports every Pipecat 1.x. These are the releases where what
+        # Tail relies on changed: 1.0 (PipelineTask), 1.3 (WorkerRunner and the
+        # bus), 1.9 (the service observers), 1.12 (first pushes), 1.13 (new
+        # RTVI messages), and the latest.
+        pipecat: ["1.0.0", "1.3.0", "1.9.0", "1.12.0", "1.13.0", "latest"]
+        include:
+          - python: "3.11"
+            pipecat: "latest"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install ${{ matrix.python }}
+
+      - name: Install development dependencies
+        run: uv sync --group dev
+
+      - name: Upgrade to latest Pipecat
+        if: matrix.pipecat == 'latest'
+        run: uv pip install --upgrade pipecat-ai
+
+      - name: Install Pipecat ${{ matrix.pipecat }}
+        if: matrix.pipecat != 'latest'
+        run: uv pip install "pipecat-ai==${{ matrix.pipecat }}"
+
+      - name: Run tests
+        run: uv run --no-sync pytest -q

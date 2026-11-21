@@ -1,0 +1,359 @@
+#
+# Copyright (c) 2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""The Logs tab: structured records with level filter, search and pinned errors."""
+
+import re
+from typing import Optional
+
+from rich.style import Style
+from rich.table import Table
+from rich.text import Text
+from textual import events
+from textual.containers import Horizontal, Vertical
+from textual.widgets import Input, RichLog, Static
+
+from pipecat_tail.state import LogRecord, SessionState
+from pipecat_tail.widgets import palette
+from pipecat_tail.widgets.render import (
+    fmt_clock,
+    truncate,
+)
+
+LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+LEVEL_RANK = {
+    "TRACE": 0,
+    "DEBUG": 10,
+    "INFO": 20,
+    "SUCCESS": 25,
+    "WARNING": 30,
+    "ERROR": 40,
+    "CRITICAL": 50,
+}
+MAX_LINES = 2000
+COMPACT_WIDTH = 100
+"""Below this width a line is the seconds, a one-letter level, the logger's last
+name and the message, wrapped, so the message is never pushed off the side."""
+_LEVEL_ROLES = {
+    "TRACE": "border",
+    "DEBUG": "dim",
+    "INFO": "ok",
+    "SUCCESS": "ok",
+    "WARNING": "warn",
+    "ERROR": "err",
+    "CRITICAL": "err",
+}
+
+
+ERROR_LEVELS = ("ERROR", "CRITICAL")
+"""The levels ``n`` and ``p`` step through."""
+
+
+def level_style(level: str) -> Style:
+    """The style a log level is shown in, in the current palette."""
+    role = _LEVEL_ROLES.get(level, "text")
+    return palette.style(role, bold=role == "err")
+
+
+class ShownLog(RichLog):
+    """A ``RichLog`` that renders what was written to it while hidden.
+
+    A log written to while its view is hidden waits for a resize to learn its
+    width, and showing the view does not always send one.
+    """
+
+    def render_deferred(self) -> None:
+        """Render the lines written while hidden, once the log has a size."""
+        if not self._size_known and self.size.width:
+            self.on_resize(events.Resize(self.size, self.virtual_size))
+
+
+class LogLines(ShownLog):
+    """The log lines themselves."""
+
+    def __init__(self):
+        """Create the log."""
+        super().__init__(id="log-lines", max_lines=MAX_LINES, wrap=False, highlight=False)
+
+
+class LogsView(Vertical):
+    """The Logs tab."""
+
+    def __init__(self):
+        """Create the tab."""
+        super().__init__(id="logs-view")
+        self.lines = LogLines()
+        self.search = Input(
+            placeholder="search (regex), Enter to apply, Esc to close", id="log-search"
+        )
+        self.pinned = Static(Text(""), id="log-pinned")
+        self.level_index = 0
+        self.pattern: Optional[re.Pattern] = None
+        self.following = True
+        self.selected: Optional[LogRecord] = None
+        self._shown = 0
+        self._state: Optional[SessionState] = None
+        self._compact = False
+
+    def compose(self):
+        """Compose the search box, the lines and the pinned errors."""
+        with Horizontal(id="log-toolbar"):
+            yield self.search
+        yield self.lines
+        yield self.pinned
+
+    def on_mount(self) -> None:
+        """Start with the search box hidden."""
+        self.search.display = False
+        self._update_title()
+
+    @property
+    def level(self) -> str:
+        """Minimum level shown."""
+        return LEVELS[self.level_index]
+
+    def cycle_level(self) -> str:
+        """Raise the minimum level, wrapping around, and rebuild."""
+        self.level_index = (self.level_index + 1) % len(LEVELS)
+        self.rebuild()
+        return self.level
+
+    def set_pattern(self, pattern: str) -> Optional[str]:
+        """Set the search pattern. Returns an error message if it is invalid."""
+        pattern = pattern.strip()
+        if not pattern:
+            self.pattern = None
+            self.rebuild()
+            return None
+        try:
+            self.pattern = re.compile(pattern, re.IGNORECASE)
+        except re.error as e:
+            return str(e)
+        self.rebuild()
+        return None
+
+    def toggle_follow(self) -> bool:
+        """Toggle auto-scroll and return the new setting. Following lets go of a selected line."""
+        self.following = not self.following
+        self.lines.auto_scroll = self.following
+        if self.following:
+            if self.selected is not None:
+                self.selected = None
+                self.rebuild()
+            self.lines.scroll_end(animate=False)
+        self._update_title()
+        return self.following
+
+    def errors(self) -> list[LogRecord]:
+        """The error lines shown, oldest first."""
+        if self._state is None:
+            return []
+        records = list(self._state.logs)[-MAX_LINES:]
+        return [r for r in records if r.level.upper() in ERROR_LEVELS and self.accepts(r)]
+
+    def jump(self, step: int) -> Optional[LogRecord]:
+        """Select the next (1) or previous (-1) error line, wrapping around.
+
+        With nothing selected, it's the first or the last one.
+        """
+        errors = self.errors()
+        if not errors:
+            return None
+        at = next((i for i, record in enumerate(errors) if record is self.selected), None)
+        if at is None:
+            index = 0 if step > 0 else len(errors) - 1
+        else:
+            index = (at + step) % len(errors)
+        self.select(errors[index])
+        return errors[index]
+
+    def select_latest_error(self) -> Optional[LogRecord]:
+        """Select the most recent error line, if there is one."""
+        errors = self.errors()
+        if errors:
+            self.select(errors[-1])
+        return errors[-1] if errors else None
+
+    def select(self, record: LogRecord) -> None:
+        """Select a line and pause following, so it stays where it is."""
+        self.selected = record
+        self.following = False
+        self.lines.auto_scroll = False
+        # Drawn once the view has its size, as it does when just shown.
+        self.call_after_refresh(self.rebuild)
+
+    def open_search(self) -> None:
+        """Show and focus the search box."""
+        self.search.display = True
+        self.search.focus()
+
+    def close_search(self) -> None:
+        """Hide the search box."""
+        self.search.display = False
+        self.lines.focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Apply the pattern on Enter."""
+        error = self.set_pattern(event.value)
+        if error:
+            self.app.notify(f"Invalid pattern: {error}", severity="error")
+        else:
+            self.lines.focus()
+
+    def accepts(self, record: LogRecord) -> bool:
+        """Whether a record passes the level and search filters."""
+        if LEVEL_RANK.get(record.level.upper(), 20) < LEVEL_RANK[self.level]:
+            return False
+        if self.pattern and not (
+            self.pattern.search(record.message) or self.pattern.search(record.name)
+        ):
+            return False
+        return True
+
+    def bind_state(self, state: SessionState) -> None:
+        """Remember the state to rebuild from."""
+        self._state = state
+
+    def rebuild(self) -> None:
+        """Rewrite the lines from the state's log records."""
+        self.lines.clear()
+        self._shown = 0
+        if self._state is None:
+            self._update_title()
+            return
+        selected_at = None
+        for record in list(self._state.logs)[-MAX_LINES:]:
+            at = self._write(record)
+            if record is self.selected:
+                selected_at = at
+        if selected_at is not None:
+            # The selected line goes in the middle, with what led to it above.
+            middle = max(0, selected_at - self.lines.scrollable_content_region.height // 2)
+            self.call_after_refresh(self.lines.scroll_to, y=middle, animate=False)
+        self._update_title()
+        self.refresh_pinned()
+
+    def append(self, record: LogRecord) -> None:
+        """Add one record if it passes the filters."""
+        self._write(record)
+        self._update_title()
+
+    def on_resize(self) -> None:
+        """Rewrite the lines when the width calls for the other layout."""
+        width = self.lines.size.width
+        compact = 0 < width < COMPACT_WIDTH
+        if width and compact != self._compact:
+            self._compact = compact
+            self.rebuild()
+
+    def _write(self, record: LogRecord) -> Optional[int]:
+        """Write a record if it passes the filters, and return the line it starts on."""
+        if not self.accepts(record):
+            return None
+        self._shown += 1
+        at = len(self.lines.lines)
+        # The scrollbar takes two columns of the content region.
+        width = max(20, self.lines.scrollable_content_region.width - 2)
+        selected = Style(bgcolor=palette.current().sel) if record is self.selected else None
+        if self._compact:
+            line = self._compact_line(record)
+            if selected:
+                line.style = selected
+            self.lines.write(line, width=width, expand=True)
+        else:
+            text = self._line(record)
+            if selected:
+                text.pad_right(max(0, width - text.cell_len))
+                text.stylize(selected)
+            self.lines.write(text)
+        return at
+
+    def _message(self, record: LogRecord) -> Text:
+        level = record.level.upper()
+        message = Text(record.message, style=palette.style("text"))
+        if level in ("ERROR", "CRITICAL"):
+            message.stylize(palette.style("err", bold=True))
+        elif level == "WARNING":
+            message.stylize(level_style("WARNING"))
+        if self.pattern:
+            message.highlight_regex(self.pattern, palette.style("warn", bold=True, underline=True))
+        if record.exception:
+            message.append(
+                f"  {truncate(record.exception, 120)}", style=palette.style("err", bold=True)
+            )
+        return message
+
+    def _compact_line(self, record: LogRecord) -> Table:
+        level = record.level.upper()
+        line = Table.grid(padding=(0, 1), expand=True)
+        line.add_column(no_wrap=True)
+        line.add_column(no_wrap=True)
+        line.add_column(no_wrap=True, width=11)
+        line.add_column(ratio=1, overflow="fold")
+        line.add_row(
+            Text(record.clock[-6:], style=palette.style("dim")),
+            Text(level[:1], style=level_style(level)),
+            Text(truncate(record.name.rsplit(".", 1)[-1], 11), style=palette.style("dim")),
+            self._message(record),
+        )
+        return line
+
+    def _line(self, record: LogRecord) -> Text:
+        text = Text()
+        text.append(record.clock, style=palette.style("dim"))
+        level = record.level.upper()
+        text.append(f"  {level[:8]:<8} ", style=level_style(level))
+        module = truncate(record.name, 34)
+        if record.worker:
+            module = truncate(f"{record.worker} {record.name}", 34)
+        text.append(f"{module:<34} ", style=palette.style("dim"))
+        text.append_text(self._message(record))
+        return text
+
+    def _update_title(self) -> None:
+        pieces = ["logs", f"level {self.level}"]
+        if self.pattern:
+            # Only matching records are shown while searching.
+            pieces.append(f"/{self.pattern.pattern}/ {self._shown} matches")
+        position = self._position()
+        if position:
+            pieces.append(position)
+        elif not self.following:
+            pieces.append("paused")
+        self.lines.border_title = " · ".join(pieces)
+
+    def _position(self) -> Optional[str]:
+        """Which error the selected line is, as ``error 2 of 5``."""
+        if self.selected is None:
+            return None
+        errors = self.errors()
+        for index, record in enumerate(errors):
+            if record is self.selected:
+                return f"error {index + 1} of {len(errors)}"
+        return None
+
+    def refresh_pinned(self) -> None:
+        """Re-render the pinned errors line."""
+        state = self._state
+        text = Text()
+        if state is None or not state.errors:
+            text.append("no errors", style=palette.style("dim"))
+            text.append(f"   {self._shown} lines shown", style=palette.style("dim"))
+            self.pinned.update(text)
+            return
+        error = state.errors[-1]
+        text.append("pinned  ", style=palette.style("dim"))
+        text.append(
+            f"{len(state.errors)} error{'s' if len(state.errors) != 1 else ''}",
+            style=palette.style("err", bold=True),
+        )
+        text.append(
+            f"  {fmt_clock(error.timestamp)} {error.processor} · {error.category} · "
+            f"{'still usable' if error.processor_usable else 'unusable'}",
+            style=palette.style("dim"),
+        )
+        text.append(f"   {self._shown} lines shown", style=palette.style("dim"))
+        self.pinned.update(text)

@@ -8,112 +8,137 @@
 
 """Tail standalone application.
 
-This is the standalone application for Tail. It connects to a Tail observer,
-whether local or remote, to receive the current conversation, service metrics,
-audio levels or system logs.
+Connects to a Tail server, local or remote, and shows the session as it
+happens. Reconnects on its own when the bot restarts. ``--demo`` plays a
+scripted session instead, to try Tail without a bot.
 
-This is registered as a `tail` command for the `pipecat-cli`.
+Registered as the ``tail`` command of the ``pipecat`` CLI.
 """
 
 import asyncio
-import json
 import sys
+from pathlib import Path
+from typing import Optional
 
 import typer
-import websockets
 from loguru import logger
 
 from pipecat_tail.app import TailApp
+from pipecat_tail.client import TailClient
 
 DEFAULT_URL = "ws://localhost:9292"
 
 
 class PipecatTail:
-    """Standalone Tail application.
+    """Standalone Tail application driven by a websocket connection."""
 
-    This is the standalone Tail application. It connects to an observer, whether
-    local or remote, and updates the UI based on the received messages.
-    """
-
-    def __init__(self, *, url: str = DEFAULT_URL):
-        """Initialize the Tail application.
-
-        It will try to connect to the provided URL. If it can not connect, it is
-        possible to connect later from the UI.
+    def __init__(
+        self,
+        *,
+        url: str = DEFAULT_URL,
+        report_path: Optional[Path] = None,
+        exit_on_disconnect: bool = False,
+    ):
+        """Initialize the application.
 
         Args:
-            url: Observer URL.
+            url: Tail server URL.
+            report_path: Where to write a report of the session on quit.
+            exit_on_disconnect: Quit when the connection ends, instead of
+                waiting for the bot to come back.
         """
         self._url = url
-
+        self._exit_on_disconnect = exit_on_disconnect
         self._app = TailApp(
-            on_mount=self._app_on_mount,
-            on_shutdown=self._app_on_shutdown,
-            action_connect=self._app_action_connect,
+            on_mount=self._on_mount,
+            on_shutdown=self._on_shutdown,
+            action_connect=self._on_connect,
+            url=url,
+            report_path=report_path,
         )
-        self._ws = None
-        self._receiver_task = None
+        # Quitting when the connection ends: a bot that's busy for a while
+        # (loading a model, say) mustn't count as gone.
+        self._client = TailClient(
+            url,
+            on_message=self._app.handle_message,
+            on_status=self._on_status,
+            reconnect=not exit_on_disconnect,
+            ping_timeout_secs=None if exit_on_disconnect else 20.0,
+        )
 
-    async def run(self):
-        """Run the application event loop asynchronously."""
+    async def run(self) -> int:
+        """Run the app until it quits, and return its exit status: 0 unless it crashed."""
         await self._app.run_async()
+        return self._app.return_code or 0
 
-    async def _app_on_mount(self):
-        """App lifecycle hook called when the UI is started."""
+    async def _on_mount(self) -> None:
+        # The app owns the terminal; keep our own logs out of it.
         logger.remove()
-        self._logger_id = logger.add(self._logger_sink)
-        await self._connect()
+        self._client.start()
 
-    async def _app_on_shutdown(self):
-        """App lifecycle hook called when the UI is shutting down."""
-        await self._disconnect()
-        logger.remove(self._logger_id)
+    async def _on_shutdown(self) -> None:
+        await self._client.stop()
         logger.add(sys.stderr)
 
-    async def _app_action_connect(self):
-        """UI action handler to (re)connect to the observer."""
-        await self._connect()
+    async def _on_connect(self) -> None:
+        self._client.reconnect_now()
 
-    async def _logger_sink(self, message: str):
-        await self._app.handle_system_log(message)
+    async def _on_status(self, status: str, detail: Optional[str] = None) -> None:
+        await self._app.handle_status(status, detail)
+        if self._exit_on_disconnect and status in ("disconnected", "error"):
+            # The bot went away; never reaching it is an error.
+            self._app.exit(return_code=1 if status == "error" else 0)
 
-    async def _connect(self):
-        """Connect to the observer."""
-        try:
-            self._ws = await websockets.connect(self._url)
-            self._receiver_task = asyncio.create_task(self._receiver_task_handler())
-        except Exception as e:
-            logger.error(f"Unable to connect to {self._url}: {e}")
-            await self._app.handle_system_status("ERROR")
 
-    async def _disconnect(self):
-        """Disconnect from the observer."""
-        if self._ws:
-            await self._ws.close()
-        if self._receiver_task:
-            await self._receiver_task
+class PipecatTailDemo:
+    """Standalone Tail application playing the scripted demo session."""
 
-    async def _receiver_task_handler(self):
-        """Receive messages and forward to the app."""
-        async for raw_message in self._ws:
-            message = json.loads(raw_message)
+    def __init__(self, *, speed: float = 1.0):
+        """Initialize the application.
+
+        Args:
+            speed: Playback speed.
+        """
+        self._speed = speed
+        self._app = TailApp(on_mount=self._on_mount, on_shutdown=self._on_shutdown, url="demo")
+        self._task: Optional[asyncio.Task] = None
+
+    async def run(self) -> int:
+        """Run the app until it quits, and return its exit status: 0 unless it crashed."""
+        await self._app.run_async()
+        return self._app.return_code or 0
+
+    async def _on_mount(self) -> None:
+        logger.remove()
+        await self._app.handle_status("connecting")
+        self._task = asyncio.create_task(self._play())
+
+    async def _on_shutdown(self) -> None:
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        logger.add(sys.stderr)
+
+    async def _play(self) -> None:
+        from pipecat_tail import demo
+
+        # Let the waiting screen show for a moment, like a bot starting up.
+        await asyncio.sleep(1.5)
+        await self._app.handle_status("connected", "demo")
+        async for message in demo.play(loop=True, speed=self._speed):
             await self._app.handle_message(message)
-        await self._app.clear()
 
 
 def version_callback(value: bool):
-    """Print version and exit."""
+    """Print the version and exit."""
     if value:
         from pipecat_tail.__version__ import version
 
         typer.echo(f"ᓚᘏᗢ Pipecat Tail Version: {typer.style(version, fg=typer.colors.GREEN)}")
         raise typer.Exit()
-
-
-def url_callback(url: str):
-    """Run Pipecat Tail standalone application."""
-    app = PipecatTail(url=url)
-    asyncio.run(app.run())
 
 
 entrypoint_cli_typer = typer.Typer(
@@ -130,13 +155,58 @@ entrypoint_cli_typer = typer.Typer(
 def cli(
     ctx: typer.Context,
     _version: bool = typer.Option(None, "--version", callback=version_callback, help="CLI version"),
-    _url: str = typer.Option(
-        DEFAULT_URL,
-        "-u",
-        "--url",
-        callback=url_callback,
-        help="URL for the Tail observer",
+    url: str = typer.Option(DEFAULT_URL, "-u", "--url", help="URL of the Tail server"),
+    demo: bool = typer.Option(
+        False, "--demo", help="Play a scripted session instead of connecting to a bot"
+    ),
+    target: float = typer.Option(
+        1.0,
+        "--target",
+        help="Response time to aim for, in seconds: green under it, amber up to 1.6 times it",
+    ),
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help="No UI: print the session as JSON lines (turns, errors, a summary) and exit "
+        "when the bot goes away",
+    ),
+    report: Optional[Path] = typer.Option(
+        None,
+        "--report",
+        help="Write a report of the session here on exit: Markdown for .md, JSON otherwise",
+    ),
+    exit_on_disconnect: bool = typer.Option(
+        False,
+        "--exit-on-disconnect",
+        help="Quit when the bot closes the connection or goes away, instead of waiting for it "
+        "to come back; a busy bot doesn't count as gone",
     ),
 ):
     """Pipecat Tail command."""
-    pass
+    if ctx.invoked_subcommand is not None:
+        return
+    from pipecat_tail.widgets import palette
+
+    palette.set_latency_target(target)
+    if as_json:
+        from pipecat_tail.report import JsonStream
+
+        # Keep stdout for the JSON lines.
+        logger.remove()
+        logger.add(sys.stderr, level="WARNING")
+        stream = JsonStream(url, report_path=report)
+        try:
+            asyncio.run(stream.run())
+        except KeyboardInterrupt:
+            pass
+        return
+    app = (
+        PipecatTailDemo()
+        if demo
+        else PipecatTail(url=url, report_path=report, exit_on_disconnect=exit_on_disconnect)
+    )
+    raise typer.Exit(asyncio.run(app.run()))
+
+
+if __name__ == "__main__":
+    entrypoint_cli_typer()
