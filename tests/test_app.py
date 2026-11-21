@@ -675,6 +675,22 @@ async def test_the_report_is_written_however_the_app_ends(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_the_logs_count_the_lines_they_hold(monkeypatch):
+    from pipecat_tail.widgets import logs
+
+    monkeypatch.setattr(logs, "MAX_LINES", 5)
+    app = TailApp()
+    async with app.run_test(size=(100, 40)) as pilot:
+        await feed(app, pilot, until=2.0)
+        for n in range(8):
+            data = {"level": "INFO", "name": "bot", "message": f"line {n}", "time": "10:00:00"}
+            await app.handle_message({"label": "tail", "type": "tail-log", "data": data})
+        await pilot.press("5")
+        await pilot.pause(0.3)
+        assert app.logs_view.shown == 5
+
+
+@pytest.mark.asyncio
 async def test_q_asks_before_quitting():
     app = TailApp()
     async with app.run_test(size=(100, 40)) as pilot:

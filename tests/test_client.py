@@ -138,3 +138,41 @@ async def test_a_client_coming_back_skips_what_it_has():
         await client.stop()
         await restarted.stop()
         logger.add(lambda _: None)
+
+
+@pytest.mark.asyncio
+async def test_a_retry_asked_for_during_a_hanging_attempt_is_kept(monkeypatch):
+    """`c` while a connection attempt hangs used to be forgotten when it
+    failed, and the client waited out the whole backoff."""
+    import time
+
+    import websockets
+
+    logger.remove()
+    attempts: list[float] = []
+
+    class Hanging:
+        async def __aenter__(self):
+            attempts.append(time.monotonic())
+            await asyncio.sleep(0.2)
+            raise OSError("no route")
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(websockets, "connect", lambda *a, **k: Hanging())
+
+    async def on_message(message):
+        pass
+
+    client = TailClient("ws://unused", on_message=on_message, min_backoff_secs=5.0)
+    client.start()
+    try:
+        await asyncio.sleep(0.05)
+        client.reconnect_now()  # while the first attempt hangs
+        await asyncio.sleep(0.6)
+        assert len(attempts) >= 2
+        assert attempts[1] - attempts[0] < 1.0
+    finally:
+        await client.stop()
+        logger.add(lambda _: None)

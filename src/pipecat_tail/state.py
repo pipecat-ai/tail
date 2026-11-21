@@ -48,6 +48,8 @@ MAX_METRIC_POINTS = 500
 MAX_WAVE = 1500
 MAX_FLOW_HISTORY = 40
 MAX_EVENTS = 6000
+MAX_ERRORS = 500
+MAX_JOBS = 200
 BARGE_IN_GRACE_SECS = 0.5
 """An interruption this soon after the bot stopped speaking still cut it off."""
 EARLY_END_SECS = 1.5
@@ -566,7 +568,8 @@ class WorkerSession:
         """
         self.name = name
         self.turns: Deque[Turn] = deque(maxlen=MAX_TURNS)
-        self.latencies: list[LatencyRecord] = []
+        # One a turn, kept as long as the turns are.
+        self.latencies: Deque[LatencyRecord] = deque(maxlen=MAX_TURNS)
         self.speech: Deque[SpeechEvent] = deque(maxlen=MAX_SPEECH_EVENTS)
         self.metrics: dict[tuple[str, str], Deque[MetricPoint]] = {}
         self.usage: dict[tuple[str, str], UsageTotals] = {}
@@ -960,7 +963,9 @@ class SessionState:
         self.sessions: dict[Optional[str], WorkerSession] = {}
         self.selected_worker: Optional[str] = None
         self.logs: Deque[LogRecord] = deque(maxlen=MAX_LOGS)
-        self.errors: list[ErrorRecord] = []
+        self.errors: Deque[ErrorRecord] = deque(maxlen=MAX_ERRORS)
+        # Every error so far, those dropped from ``errors`` included.
+        self.errors_seen = 0
         self.bus: Deque[BusRecord] = deque(maxlen=MAX_BUS)
         self.jobs: dict[str, Job] = {}
         self.last_message_at: Optional[float] = None
@@ -1066,6 +1071,10 @@ class SessionState:
         if selected:
             return selected
         return set(caps) if isinstance(caps, list) else set()
+
+    def _add_error(self, error: ErrorRecord) -> None:
+        self.errors.append(error)
+        self.errors_seen += 1
 
     def errors_for(self, session: WorkerSession) -> list[ErrorRecord]:
         """The errors in a session's worker, and those not tied to any worker."""
@@ -1223,7 +1232,7 @@ class SessionState:
                     worker=worker,
                     exception_type=data.get("exception_type"),
                 )
-                self.errors.append(error)
+                self._add_error(error)
                 # Pipecat logs a processor's error as a warning, if at all: the
                 # logs show it as the error it is.
                 self.logs.append(error.as_log())
@@ -1480,16 +1489,14 @@ class SessionState:
         session = self.session(worker)
         tool_call_id = str(data.get("tool_call_id", ""))
         kind = str(data.get("kind", "function_call_started"))
-        turn = session.turn_for_output()
-        call = turn.function_call(tool_call_id)
+        # A call settling after its turn ended still belongs to the turn it
+        # started in; only a new call opens a turn for the bot's output.
+        call = next(
+            (c for t in reversed(session.turns) if (c := t.function_call(tool_call_id))),
+            None,
+        )
         if call is None:
-            # A call settling in a later turn than it started still belongs
-            # to the turn it started in.
-            for previous in reversed(session.turns):
-                call = previous.function_call(tool_call_id)
-                if call is not None:
-                    break
-        if call is None:
+            turn = session.turn_for_output()
             call = FunctionCall(
                 tool_call_id=tool_call_id,
                 function_name=str(data.get("function_name") or "?"),
@@ -1658,6 +1665,9 @@ class SessionState:
                 requested_at=timestamp,
             )
             self.jobs[job_id] = job
+            if len(self.jobs) > MAX_JOBS:
+                # The oldest job goes first.
+                del self.jobs[next(iter(self.jobs))]
         match kind:
             case "requested":
                 job.job_name = data.get("job_name")
@@ -1826,7 +1836,7 @@ class SessionState:
                 self.logs.append(_parse_loguru_line(text, worker))
                 return {LOGS}
             case "error":
-                self.errors.append(
+                self._add_error(
                     ErrorRecord(
                         message=str(data.get("error", "")),
                         category="unknown",

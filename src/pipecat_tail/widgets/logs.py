@@ -249,6 +249,11 @@ class LogsView(Vertical):
             self._compact = compact
             self.rebuild()
 
+    @property
+    def shown(self) -> int:
+        """How many lines the view holds: it keeps the latest ``MAX_LINES``."""
+        return min(self._shown, MAX_LINES)
+
     def _write(self, record: LogRecord) -> Optional[int]:
         """Write a record if it passes the filters, and return the line it starts on."""
         if not self.accepts(record):
@@ -317,7 +322,7 @@ class LogsView(Vertical):
         pieces = ["logs", f"level {self.level}"]
         if self.pattern:
             # Only matching records are shown while searching.
-            pieces.append(f"/{self.pattern.pattern}/ {self._shown} matches")
+            pieces.append(f"/{self.pattern.pattern}/ {self.shown} matches")
         position = self._position()
         if position:
             pieces.append(position)
@@ -341,13 +346,13 @@ class LogsView(Vertical):
         text = Text()
         if state is None or not state.errors:
             text.append("no errors", style=palette.style("dim"))
-            text.append(f"   {self._shown} lines shown", style=palette.style("dim"))
+            text.append(f"   {self.shown} lines shown", style=palette.style("dim"))
             self.pinned.update(text)
             return
         error = state.errors[-1]
         text.append("pinned  ", style=palette.style("dim"))
         text.append(
-            f"{len(state.errors)} error{'s' if len(state.errors) != 1 else ''}",
+            f"{state.errors_seen} error{'s' if state.errors_seen != 1 else ''}",
             style=palette.style("err", bold=True),
         )
         text.append(
@@ -355,5 +360,5 @@ class LogsView(Vertical):
             f"{'still usable' if error.processor_usable else 'unusable'}",
             style=palette.style("dim"),
         )
-        text.append(f"   {self._shown} lines shown", style=palette.style("dim"))
+        text.append(f"   {self.shown} lines shown", style=palette.style("dim"))
         self.pinned.update(text)

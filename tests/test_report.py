@@ -83,3 +83,18 @@ async def test_json_stream_prints_every_turn_whatever_python_ids_it_gets(monkeyp
     stream.finish()
     kinds = [json.loads(line)["event"] for line in out.getvalue().splitlines()]
     assert kinds.count("turn") == 8
+
+
+@pytest.mark.asyncio
+async def test_json_stream_prints_every_error_past_the_ones_tail_keeps(monkeypatch):
+    from pipecat_tail import state as state_module
+
+    monkeypatch.setattr(state_module, "MAX_ERRORS", 2)
+    out = io.StringIO()
+    stream = JsonStream("ws://unused", out=out)
+    for n in range(4):
+        await stream.on_message(
+            {"label": "tail", "type": "tail-error", "worker": "bot", "data": {"message": str(n)}}
+        )
+    errors = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert [e["message"] for e in errors if e["event"] == "error"] == ["0", "1", "2", "3"]

@@ -136,6 +136,9 @@ class TailClient:
 
         backoff = self._min_backoff
         while True:
+            # From here a retry asked for cuts the next wait short, even one
+            # asked for while this attempt hangs.
+            self._wake.clear()
             await self._status("connecting", self._url)
             try:
                 async with websockets.connect(
@@ -171,7 +174,6 @@ class TailClient:
             if not self._reconnect:
                 return
 
-            self._wake.clear()
             try:
                 await asyncio.wait_for(self._wake.wait(), timeout=backoff)
             except asyncio.TimeoutError:

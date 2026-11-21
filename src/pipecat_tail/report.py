@@ -387,9 +387,11 @@ class JsonStream:
             )
         elif msg_type == "tail-pipeline-started":
             self.emit("session_started", worker=worker, processors=data.get("processors"))
-        while self._errors < len(self.state.errors):
-            self.emit("error", **_error(self.state.errors[self._errors]))
-            self._errors += 1
+        # Errors are counted as they come: the oldest are dropped from the list.
+        new = self.state.errors_seen - self._errors
+        for error in list(self.state.errors)[-new:] if new else []:
+            self.emit("error", **_error(error))
+        self._errors = self.state.errors_seen
         for session in self.state.sessions.values():
             for turn in session.turns:
                 if turn.ended and turn.has_content and _key(session, turn) not in self._emitted:

@@ -766,3 +766,32 @@ def test_a_worker_that_starts_again_is_a_restarted_bot():
     state.apply({**started, "timestamp": 200.0})
     assert state.selected is not first
     assert state.selected.started_at == 200.0 and not state.selected.speech
+
+
+def test_a_call_settling_after_its_turn_stays_in_it():
+    """It used to open an empty turn of its own before finding where it began."""
+    state = SessionState()
+    state.apply(tail("tail-turn", {"turn": 1, "kind": "started"}))
+    call = {"tool_call_id": "call_1", "function_name": "get_weather"}
+    state.apply(tail("tail-function-call", {**call, "kind": "function_call_started"}))
+    state.apply(tail("tail-turn", {"turn": 1, "kind": "ended", "duration_secs": 2.0}))
+    state.apply(
+        tail("tail-function-call", {**call, "kind": "function_call_completed", "result": 1})
+    )
+    session = state.selected
+    assert len(session.turns) == 1
+    assert session.turns[0].function_calls[0].result == 1
+
+
+def test_errors_and_jobs_are_capped_and_errors_still_counted(monkeypatch):
+    from pipecat_tail import state as state_module
+
+    monkeypatch.setattr(state_module, "MAX_ERRORS", 3)
+    monkeypatch.setattr(state_module, "MAX_JOBS", 2)
+    state = SessionState()
+    for n in range(5):
+        state.apply(tail("tail-error", {"message": f"boom {n}", "processor": "tts"}))
+        state.apply(tail("tail-job", {"job_id": f"job-{n}", "kind": "requested"}, worker=None))
+    assert [e.message for e in state.errors] == ["boom 2", "boom 3", "boom 4"]
+    assert state.errors_seen == 5
+    assert list(state.jobs) == ["job-3", "job-4"]
