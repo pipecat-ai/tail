@@ -768,6 +768,79 @@ async def test_tail_workers_in_one_process_share_one_app(monkeypatch):
     assert logs.count("both calls have a Tail worker") == 1
 
 
+SETUP_FILE = """
+import json
+
+from pipecat_tail import setup_tail
+from pipecat_tail.sink import CallbackSink
+
+
+async def write(message):
+    with open({out!r}, "a") as f:
+        f.write(json.dumps(message, default=str) + "\\n")
+
+
+async def setup_pipeline_worker(worker):
+    await setup_tail(worker, sink=CallbackSink(write))
+    await setup_tail(worker, sink=CallbackSink(write))  # a second call does nothing
+
+
+async def setup_pipeline_task(task):
+    await setup_tail(task, sink=CallbackSink(write))
+"""
+
+
+@pytest.mark.asyncio
+async def test_setup_tail_from_a_setup_file(monkeypatch, tmp_path):
+    """A bot gets Tail from a Pipecat setup file, without changing its code:
+    its runner's TailWorker from Pipecat 1.8, a TailObserver before."""
+    out = tmp_path / "messages.jsonl"
+    setup = tmp_path / "tail_setup.py"
+    setup.write_text(SETUP_FILE.format(out=str(out)))
+    monkeypatch.setenv("PIPECAT_SETUP_FILES", str(setup))
+    logger.remove()
+    worker, _ = await run_pipeline("bot-13", lambda _: None)
+    logger.add(lambda _: None)
+
+    messages = [json.loads(line) for line in out.read_text().splitlines()]
+    types = [m["type"] for m in messages]
+    assert_conversation(types)
+    # Once: a second call for the same pipeline added nothing.
+    assert types.count("tail-pipeline-started") == 1
+    assert "tail-pipeline-finished" in types
+    # The runner's TailWorker reports the bus too; an observer on its own can't.
+    assert ("tail-bus" in types) == hasattr(worker, "worker_runner")
+
+
+@needs_workers
+@pytest.mark.asyncio
+async def test_setup_tail_gives_a_runner_one_tail_worker(monkeypatch, tmp_path):
+    """Every pipeline on a runner reports through the same TailWorker."""
+    from pipecat.pipeline.worker import PipelineWorker
+
+    from pipecat_tail import setup as setup_module
+
+    if not hasattr(PipelineWorker, "worker_runner"):
+        pytest.skip("workers know their runner from Pipecat 1.8")
+    setup = tmp_path / "tail_setup.py"
+    setup.write_text(SETUP_FILE.format(out=str(tmp_path / "messages.jsonl")))
+    monkeypatch.setenv("PIPECAT_SETUP_FILES", str(setup))
+    logger.remove()
+    workers = [
+        PipelineWorker(Pipeline([FakeLLM(name="proc")]), name=name, idle_timeout_secs=None)
+        for name in ("bot-14", "bot-15")
+    ]
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(*workers)
+    run_task = asyncio.create_task(runner.run())
+    await asyncio.sleep(0.8)
+    for worker in workers:
+        await worker.queue_frames(frames("proc"))
+    await asyncio.wait_for(run_task, 15.0)
+    logger.add(lambda _: None)
+    assert set(setup_module._tails[runner]._observed) == {"bot-14", "bot-15"}
+
+
 def test_audio_level_follows_loudness():
     assert audio_level(b"") == 0.0
     # A chunk that ends mid-sample is measured, not an error.

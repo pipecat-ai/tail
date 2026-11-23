@@ -146,22 +146,24 @@ You get everything except workers, jobs and the bus, which need Pipecat 1.3.
 
 ### Without changing the bot's code
 
-Pipecat runs the setup files listed in `PIPECAT_SETUP_FILES`. This one adds Tail to a bot on Pipecat 1.3 or later:
+Pipecat runs the setup files listed in `PIPECAT_SETUP_FILES`. Call `setup_tail` from one to add Tail to any bot:
 
 ```python
 # tail_setup.py
-from pipecat_tail import TailObserver
+from pipecat_tail import setup_tail
 
 async def setup_pipeline_worker(worker):
-    worker.add_observer(TailObserver())
+    await setup_tail(worker)
+
+async def setup_pipeline_task(task):  # Pipecat 1.0 to 1.2
+    await setup_tail(task)
 ```
 
 ```bash
 PIPECAT_SETUP_FILES=tail_setup.py python bot.py
-pipecat tail    # in another terminal
 ```
 
-On Pipecat 1.0 to 1.2, name the function `setup_pipeline_task(task)` and call `task.add_observer(TailObserver())`.
+On Pipecat 1.8 and later the dashboard opens in the bot's terminal, as with a `TailWorker`; `setup_tail(worker, server=True)` serves it for `pipecat tail` instead. Before 1.8, run `pipecat tail` in another terminal. The file stays yours: the same hooks can add observers of your own.
 
 ## Pipecat versions
 
