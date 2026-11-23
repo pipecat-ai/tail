@@ -229,7 +229,7 @@ uv run --group examples examples/bot.py
 
 That opens the dashboard in the same terminal with a `TailWorker`. `TAIL_RUNNER=observer` runs it with a `TailObserver` instead; then run `pipecat tail` in another terminal.
 
-Changes are recorded as [towncrier](https://towncrier.readthedocs.io/) fragments in `changelog/`.
+Changes are recorded as [towncrier](https://towncrier.readthedocs.io/) fragments in `changelog/`. For a release, the "Generate Changelog for Release" action builds `CHANGELOG.md` from them and opens a pull request.
 
 ## 📚 Next steps
 
