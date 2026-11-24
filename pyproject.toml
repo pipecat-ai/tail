@@ -137,6 +137,8 @@ ignore = [
 # Skip D104 (missing docstring in public package) for __init__.py files
 "**/__init__.py" = ["D104"]
 "tests/**/*.py" = ["D"]
+# Skip docstring checks for the release scripts, kept as they are in Pipecat.
+"scripts/**/*.py" = ["D"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
