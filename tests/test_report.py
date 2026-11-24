@@ -2,6 +2,7 @@
 
 import io
 import json
+import re
 
 import pytest
 
@@ -151,5 +152,6 @@ def test_the_demo_doesnt_go_with_json():
     from pipecat_tail.cli import entrypoint_cli_typer
 
     result = CliRunner().invoke(entrypoint_cli_typer, ["--demo", "--json"])
-    assert result.exit_code != 0
-    assert "--json" in result.output
+    # A usage error, said in color where the terminal (or CI) allows it.
+    assert result.exit_code == 2
+    assert "--json" in re.sub(r"\x1b\[[0-9;]*m", "", result.output)
