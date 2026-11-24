@@ -6,9 +6,14 @@
 
 # ᓚᘏᗢ Tail: a terminal for voice agents
 
-When you talk to your voice bot, you only hear half of what happened. Did it cut you off? Was that silence the LLM, a tool call or the speech synthesis? What did the LLM actually get?
+When you talk to your voice bot, it's hard to tell what happened. Did it cut you off? Was that silence the LLM, a tool call or the speech synthesis? What did the LLM actually get?
 
-**Tail** shows you while you talk. It's a terminal dashboard for bots built with [Pipecat](https://github.com/pipecat-ai/pipecat), and it fits in a side pane as narrow as 48 columns.
+**Tail** is a terminal dashboard for bots built with [Pipecat](https://github.com/pipecat-ai/pipecat). While you talk to your bot, it shows:
+
+- ⏱️ How long the bot takes to answer, counting up while it thinks, and where the time goes: end of turn, LLM, tools, speech.
+- 💬 Every turn: what you said, the tool calls and the bot's words, so you see where an interruption cut the bot off.
+- ⚠️ Early ends of turn, cut-offs, slow answers and errors, flagged on the turn they happened in.
+- 🔍 The context the LLM saw for each turn, every processor in the pipeline, service metrics and logs.
 
 <p align="center"><img src="https://raw.githubusercontent.com/pipecat-ai/tail/refs/heads/main/tail-image.gif" alt="Tail playing its demo session: the voice-to-voice clock counting while the bot calls a flight search tool, then the bot speaking; a typed turn, a transport error and a turn Pipecat ended before the user had finished; then n stepping back through the turns where something went wrong and f following the call again" width="900"/></p>
 
@@ -20,13 +25,6 @@ pipecat tail --demo
 ```
 
 The demo plays a scripted call, so you can look around before [adding Tail to your bot](#-add-tail-to-your-bot).
-
-## 👀 What you get
-
-- ⏱️ **The wait, live:** how long the bot takes to answer, counting up while it thinks, and where the time goes (end of turn, LLM, tools, speech).
-- 💬 **Every turn:** what you said, the tool calls, and the bot's words, so you see exactly where an interruption cut it off.
-- ⚠️ **What went wrong:** early ends of turn, cut-offs, slow answers and errors, flagged on their turn.
-- 🔍 **The details:** the context the LLM saw for each turn, every processor in the pipeline, service metrics and logs.
 
 ## 📦 Install
 
@@ -110,7 +108,7 @@ Response times are green under your target, amber up to 1.6 times it, and red ab
 
 Press Enter on a turn to see where its time went, the context the LLM saw, and the events behind it.
 
-**Early ends of turn** (`▲ early end`) are the bug you can feel but can't see: Pipecat ended your turn at a pause, and you kept talking. Tail flags them and explains each one, so you know when to tune the VAD's `stop_secs` or your turn analyzer.
+**Early ends of turn** (`▲ early end`) are turns Pipecat ended at a pause while you kept talking. Tail flags them and explains each one, so you know when to tune the VAD's `stop_secs` or your turn analyzer.
 
 ## ⌨️ Keys
 
