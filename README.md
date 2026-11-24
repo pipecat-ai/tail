@@ -188,7 +188,7 @@ uv run --group examples examples/bot.py                      # the dashboard in 
 TAIL_RUNNER=observer uv run --group examples examples/bot.py   # then `pipecat tail` in another
 ```
 
-Changes go in [towncrier](https://towncrier.readthedocs.io/) fragments in `changelog/`. For a release, the "Generate Changelog for Release" action builds `CHANGELOG.md` from them.
+Changes go in [towncrier](https://towncrier.readthedocs.io/) fragments in `changelog/`. For a release, the "Generate Changelog for Release" action builds `CHANGELOG.md` from them, and publishing a tag creates its GitHub release from that section.
 
 ## 📚 Next steps
 
