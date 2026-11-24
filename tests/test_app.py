@@ -691,6 +691,21 @@ async def test_the_logs_count_the_lines_they_hold(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_esc_ends_a_search_in_the_logs():
+    """It used to hide the box and keep the filter, hiding every other line."""
+    app = TailApp()
+    async with app.run_test(size=(100, 40)) as pilot:
+        await feed(app, pilot)
+        await pilot.press("5", "slash", "t", "i", "m", "e", "enter")
+        await pilot.pause(0.2)
+        assert app.logs_view.pattern is not None
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert app.logs_view.pattern is None
+        assert not app.logs_view.search.display
+
+
+@pytest.mark.asyncio
 async def test_q_asks_before_quitting():
     app = TailApp()
     async with app.run_test(size=(100, 40)) as pilot:

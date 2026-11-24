@@ -156,6 +156,7 @@ def session_summary(state: SessionState, session: WorkerSession) -> dict[str, An
             )
             if latencies
             else None,
+            "on_target_answers": sum(1 for v in latencies if palette.on_target(v)),
             "greeting": _round(next((r.latency_secs for r in session.latencies), None))
             if session.latencies and session.latencies[0].first_bot_speech
             else None,
@@ -307,9 +308,9 @@ def write_report(state: SessionState, path: Path) -> Path:
     """Write the report to ``path``: Markdown for ``.md``, JSON otherwise."""
     path = Path(path)
     if path.suffix.lower() in (".md", ".markdown"):
-        path.write_text(markdown(state))
+        path.write_text(markdown(state), encoding="utf-8")
     else:
-        path.write_text(json.dumps(report(state), indent=2, default=str))
+        path.write_text(json.dumps(report(state), indent=2, default=str), encoding="utf-8")
     return path
 
 
@@ -363,7 +364,13 @@ class JsonStream:
         """Connect and stream until the bot goes away."""
         from pipecat_tail.client import TailClient
 
-        client = TailClient(self.url, on_message=self.on_message, on_status=self.on_status)
+        # A bot busy for a while (loading a model, say) mustn't end the stream.
+        client = TailClient(
+            self.url,
+            on_message=self.on_message,
+            on_status=self.on_status,
+            ping_timeout_secs=None,
+        )
         client.start()
         try:
             await self._done.wait()

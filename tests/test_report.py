@@ -98,3 +98,58 @@ async def test_json_stream_prints_every_error_past_the_ones_tail_keeps(monkeypat
         )
     errors = [json.loads(line) for line in out.getvalue().splitlines()]
     assert [e["message"] for e in errors if e["event"] == "error"] == ["0", "1", "2", "3"]
+
+
+def test_reports_are_utf_8_whatever_the_locale(tmp_path):
+    """On Windows the locale encoding can't write → or ▲, and saving crashed."""
+    import os
+    import subprocess
+    import sys
+
+    script = (
+        "import sys; from pathlib import Path; from pipecat_tail import demo; "
+        "from pipecat_tail.report import write_report; from pipecat_tail.state import SessionState; "
+        "state = SessionState(); [state.apply(m) for m in demo.messages(base=1_000_000.0)]; "
+        "write_report(state, Path(sys.argv[1]))"
+    )
+    env = {**os.environ, "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"}
+    path = tmp_path / "report.md"
+    done = subprocess.run([sys.executable, "-c", script, str(path)], env=env, capture_output=True)
+    assert done.returncode == 0, done.stderr.decode()[-400:]
+    assert "→" in path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_json_stream_waits_on_a_busy_bot(monkeypatch):
+    """A bot busy for a while (a model loading) mustn't end the stream."""
+    import asyncio
+
+    from pipecat_tail import client as client_module
+
+    seen = {}
+
+    class Client:
+        def __init__(self, url, **kwargs):
+            seen.update(kwargs)
+
+        def start(self):
+            pass
+
+        async def stop(self):
+            pass
+
+    monkeypatch.setattr(client_module, "TailClient", Client)
+    stream = JsonStream("ws://unused", out=io.StringIO())
+    asyncio.get_running_loop().call_later(0.1, stream._done.set)
+    await stream.run()
+    assert seen["ping_timeout_secs"] is None
+
+
+def test_the_demo_doesnt_go_with_json():
+    from typer.testing import CliRunner
+
+    from pipecat_tail.cli import entrypoint_cli_typer
+
+    result = CliRunner().invoke(entrypoint_cli_typer, ["--demo", "--json"])
+    assert result.exit_code != 0
+    assert "--json" in result.output

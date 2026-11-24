@@ -93,14 +93,20 @@ class PipecatTail:
 class PipecatTailDemo:
     """Standalone Tail application playing the scripted demo session."""
 
-    def __init__(self, *, speed: float = 1.0):
+    def __init__(self, *, speed: float = 1.0, report_path: Optional[Path] = None):
         """Initialize the application.
 
         Args:
             speed: Playback speed.
+            report_path: Where to write a report of the session on quit.
         """
         self._speed = speed
-        self._app = TailApp(on_mount=self._on_mount, on_shutdown=self._on_shutdown, url="demo")
+        self._app = TailApp(
+            on_mount=self._on_mount,
+            on_shutdown=self._on_shutdown,
+            url="demo",
+            report_path=report_path,
+        )
         self._task: Optional[asyncio.Task] = None
 
     async def run(self) -> int:
@@ -188,6 +194,8 @@ def cli(
     from pipecat_tail.widgets import palette
 
     palette.set_latency_target(target)
+    if demo and as_json:
+        raise typer.BadParameter("--demo plays on screen; it can't go with --json")
     if as_json:
         from pipecat_tail.report import JsonStream
 
@@ -201,7 +209,7 @@ def cli(
             pass
         return
     app = (
-        PipecatTailDemo()
+        PipecatTailDemo(report_path=report)
         if demo
         else PipecatTail(url=url, report_path=report, exit_on_disconnect=exit_on_disconnect)
     )

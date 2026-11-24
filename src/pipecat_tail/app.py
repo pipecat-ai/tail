@@ -691,9 +691,11 @@ class TailApp(App):
         self._show_following()
 
     def action_end_search(self) -> None:
-        """``esc`` closes the search box, or else ends the conversation search."""
+        """``esc`` closes the search box, or else ends the search in view."""
         if self.live.search.has_focus:
             self.live.close_search()
+        elif self.view == "logs" and self.logs_view.pattern is not None:
+            self.logs_view.close_search()
         elif self.view == "live" and self.live.conversation.search_text:
             self.live.conversation.set_search(None)
             self._show_following()

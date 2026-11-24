@@ -27,7 +27,7 @@ The demo plays a scripted call, with tool calls, an interruption, a typed messag
 - **Every turn.** What you said or typed, the tool calls with their arguments and results, and the bot's words, bright once spoken and dim until then, so you see exactly where an interruption stopped it.
 - **What went wrong.** Early ends of turn, cut-offs, slow answers, turns the LLM marked incomplete and errors are flagged on their turn, and `n` `p` jump between them.
 - **Both voices on a timeline**, with raw VAD, the end of each turn, each response time, backchannels and interruptions.
-- **The raw data underneath.** Enter opens a turn: where its time went, the exact context the LLM saw, and every event Tail received.
+- **The raw data underneath.** Enter opens a turn: where its time went, the context the LLM saw, and the events Tail received for it.
 - **The rest of the pipeline.** Every processor and the frames moving through it, startup timing, service metrics, token usage, workers, jobs and logs.
 
 ## A tour
@@ -36,9 +36,9 @@ The top of the screen is always there. It shows:
 
 - The bot's state: **LISTENING**, **THINKING** or **SPEAKING**.
 - The voice-to-voice clock, and where the current turn's time is going.
-- On wide terminals, the session: median and worst response, early ends, interruptions and errors.
+- On wide terminals, the session: median and worst response (p95 once there are 20 answers), early ends, interruptions and errors.
 
-Response times are green under your target, amber up to 1.6 times it, and red above. ✓, ▲ and ✕ mark them too, so they never rely on color alone. The target is 1 s. Change it with `pipecat tail --target 0.8`.
+Response times are green under your target, amber up to 1.6 times it, and red above. ✓, ▲ and ✕ mark them too, so they never rely on color alone. The target is 1 s; `pipecat tail --target 0.8` changes it in a terminal of its own.
 
 Below the top are five views:
 
@@ -55,8 +55,8 @@ Below the top are five views:
 **The turn inspector** opens on Enter. It has three pages:
 
 - **turn**: what was said, where the time went, and the tool calls.
-- **context**: exactly what the LLM saw, with what's new marked.
-- **events**: every message Tail received for the turn.
+- **context**: what the LLM saw, with what's new marked and long texts clipped.
+- **events**: what Tail received for the turn, all but audio levels, flow, logs and the bus.
 
 **Early ends of turn** are flagged `▲ early end`. Pipecat ended your turn at a pause, and you went on before the bot spoke. Tail marks them on the voice timeline, counts them, and explains each one in the inspector. They tell you to tune the VAD's `stop_secs` or your turn analyzer.
 
@@ -157,6 +157,9 @@ async def setup_pipeline_worker(worker):
 
 async def setup_pipeline_task(task):  # Pipecat 1.0 to 1.2
     await setup_tail(task)
+
+async def setup_worker_runner(runner):  # Pipecat 1.3+ warns when a setup file has none
+    pass
 ```
 
 ```bash
@@ -175,7 +178,7 @@ Tail works with every Pipecat 1.x release. It looks for what the bot's Pipecat h
 | 1.3     | Workers, jobs and the bus (`TailWorker`)                                                                                                                          |
 | 1.9     | Richer metrics, tool call and error reports from Pipecat's dedicated observers; latency breakdowns by contribution                                                |
 | 1.11    | The LLM's turn-completion markers                                                                                                                                 |
-| 1.13    | `user-input`: typed messages, backchannels, interim transcriptions; the raw STT, LLM and TTS text                                                                 |
+| 1.13    | `user-input`: typed messages and backchannels; the raw LLM and TTS text                                                                                           |
 | 1.15    | The bot's delivery tags and the user's tone                                                                                                                       |
 | 1.16    | Diarized speakers                                                                                                                                                 |
 

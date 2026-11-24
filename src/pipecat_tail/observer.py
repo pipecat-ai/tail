@@ -292,24 +292,36 @@ class _RTVIBridge(RTVIObserver):
         await self._owner.send_rtvi_message(model, exclude_none)
 
 
+_TAIL_READS = (
+    "user_speaking_enabled",
+    "bot_speaking_enabled",
+    "user_transcription_enabled",
+    "bot_output_enabled",
+    "bot_llm_enabled",
+    "bot_tts_enabled",
+    "vad_user_speaking_enabled",
+    "user_input_enabled",
+    "llm_raw_text_enabled",
+    "tts_raw_text_enabled",
+    "bot_llm_marker_enabled",
+    "metrics_enabled",
+    "function_call_report_level",
+)
+"""The RTVI settings for what Tail reads the session from."""
+
+
 def _for_tail(params: RTVIObserverParams) -> RTVIObserverParams:
     """The RTVI settings Tail needs, whatever settings it was given.
 
-    Tail measures audio levels itself (see ``audio_level``). From Pipecat
-    1.13 it reads the user's words and the bot's text from ``user-input``
-    and the raw text messages, and drops the older ones that repeat them, so
-    those have to be on.
+    What Tail reads the session from is set as in ``default_rtvi_params()``:
+    turned off, it would lose turns, the wait or the bot's words. Audio
+    levels are Tail's own (see ``audio_level``).
     """
-    needed = {
-        "user_audio_level_enabled": False,
-        "bot_audio_level_enabled": False,
-        "user_input_enabled": True,
-        "llm_raw_text_enabled": True,
-        "tts_raw_text_enabled": True,
-    }
-    return dataclasses.replace(
-        params, **{k: v for k, v in needed.items() if k in compat.RTVI_PARAMS}
-    )
+    defaults = default_rtvi_params()
+    needed = {k: getattr(defaults, k) for k in _TAIL_READS if k in compat.RTVI_PARAMS}
+    needed["user_audio_level_enabled"] = False
+    needed["bot_audio_level_enabled"] = False
+    return dataclasses.replace(params, **needed)
 
 
 class TailObserver(BaseObserver):

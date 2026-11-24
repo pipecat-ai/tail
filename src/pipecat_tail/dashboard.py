@@ -114,7 +114,8 @@ class _Dashboard:
         The task's result is whether the user quit it, rather than it crashing.
         """
         if self.closed is None or self.closed.done():
-            self.server = TailWebSocketServer(host="127.0.0.1", port=0)
+            # No pings: an app busy drawing mustn't count as gone, and quit.
+            self.server = TailWebSocketServer(host="127.0.0.1", port=0, keepalive=False)
             self.closed = asyncio.create_task(self._show(self.server, log_level))
         return self.closed
 

@@ -47,6 +47,11 @@ ServiceMetricsObserver = _optional(
     "pipecat.observers.service_metrics_observer", "ServiceMetricsObserver"
 )
 
+HAS_BOT_INTERRUPTED = (
+    _optional("pipecat.processors.frameworks.rtvi.models", "BotInterruptedMessage") is not None
+)
+"""Whether RTVI says when the bot is interrupted (``bot-interrupted``)."""
+
 HAS_WORKERS = _optional("pipecat.workers.runner", "WorkerRunner") is not None
 """Whether Pipecat has ``WorkerRunner``, workers and the worker bus (1.3+)."""
 
@@ -136,6 +141,8 @@ def capabilities() -> list[str]:
         caps.append("llm-marker")
     if HAS_WORKERS:
         caps.append("workers")
+    if HAS_BOT_INTERRUPTED:
+        caps.append("interruptions")
     return caps
 
 

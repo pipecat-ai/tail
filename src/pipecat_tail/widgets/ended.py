@@ -40,7 +40,7 @@ def call_summary(state: SessionState, session: WorkerSession) -> list[Text]:
         line.append(" · worst ", style=muted)
         line.append(fmt_secs(worst), style=Style(color=palette.latency_color(worst), bold=True))
         lines.append(line)
-        on_target = round((latency["on_target"] or 0) * latency["turns"])
+        on_target = latency["on_target_answers"]
         lines.append(Text(f"{on_target} of {latency['turns']} answers on target", style=muted))
     issues = [
         _count(summary["early_ends"], "early end"),

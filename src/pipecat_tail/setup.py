@@ -18,6 +18,9 @@ bot gets Tail without changing its code::
     async def setup_pipeline_task(task):  # Pipecat 1.0 to 1.2
         await setup_tail(task)
 
+    async def setup_worker_runner(runner):  # Pipecat 1.3+ warns without it
+        pass
+
 The setup file stays yours: the same hooks can add observers or workers of
 your own.
 """
@@ -27,8 +30,10 @@ from typing import Any, Optional
 
 from pipecat_tail.observer import TailObserver
 
-# Each runner's Tail worker, made with the runner's first pipeline.
-_tails: "weakref.WeakKeyDictionary[Any, Any]" = weakref.WeakKeyDictionary()
+# Each runner's Tail worker, made with the runner's first pipeline, is kept
+# on the runner, so the two go together: a table keyed by runner would keep
+# every runner alive, as its TailWorker holds it.
+_TAIL_WORKER = "_pipecat_tail_worker"
 # The pipelines Tail already reports on.
 _set_up: "weakref.WeakSet[Any]" = weakref.WeakSet()
 
@@ -56,13 +61,14 @@ async def setup_tail(target: Any, *, server: bool = False, **kwargs: Any) -> Non
     if runner is None:
         target.add_observer(TailObserver(**kwargs))
         return
-    tail = _tails.get(runner)
+    tail = getattr(runner, _TAIL_WORKER, None)
     if tail is not None:
         target.add_observer(tail.create_observer(target))
         return
     from pipecat_tail.worker import TailWorker
 
-    tail = _tails[runner] = TailWorker(target, server=server, **kwargs)
+    tail = TailWorker(target, server=server, **kwargs)
+    setattr(runner, _TAIL_WORKER, tail)
     # Pipecat 1.8 to 1.15 start a worker added while the runner is starting
     # its own only once it is running: then the worker is added when the
     # runner is ready. There's no public way to tell before 1.16.

@@ -1195,6 +1195,17 @@ class SessionState:
                 if data.get("kind") == "started":
                     session.start_turn(number)
                 else:
+                    turn = session.turn_by_number(number)
+                    if (
+                        data.get("was_interrupted")
+                        and "interruptions" not in session.capabilities
+                        and turn is not None
+                        and turn.has_bot_content
+                        and not turn.interrupted
+                    ):
+                        # This Pipecat doesn't say when the bot is cut off;
+                        # the turn it was cut off in does.
+                        self._speech(session, "interruption", timestamp, None)
                     session.end_turn(
                         number,
                         _number(data.get("duration_secs")),

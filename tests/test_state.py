@@ -795,3 +795,32 @@ def test_errors_and_jobs_are_capped_and_errors_still_counted(monkeypatch):
     assert [e.message for e in state.errors] == ["boom 2", "boom 3", "boom 4"]
     assert state.errors_seen == 5
     assert list(state.jobs) == ["job-3", "job-4"]
+
+
+def test_interruptions_count_on_a_pipecat_that_doesnt_say(monkeypatch):
+    """RTVI says when the bot is cut off from Pipecat 1.8; before, the turn
+    it was cut off in does, and it counts once either way."""
+    for says in (False, True):
+        state = SessionState()
+        caps = ["conversation"] + (["interruptions"] if says else [])
+        state.apply(tail("tail-pipeline-started", {"capabilities": caps}))
+        state.apply(tail("tail-turn", {"turn": 1, "kind": "started"}))
+        state.apply(rtvi("bot-llm-text", {"text": "Let me tell you about"}))
+        state.apply(rtvi("bot-started-speaking"))
+        if says:
+            state.apply(rtvi("bot-interrupted"))
+        state.apply(tail("tail-turn", {"turn": 1, "kind": "ended", "was_interrupted": True}))
+        session = state.selected
+        assert session.interruptions == 1
+        assert session.turns[0].interrupted
+
+
+def test_the_answers_on_target_are_counted_not_rounded():
+    """51 of 101 is a share of 0.50 to two places: 50.5 answers, rounded to 50."""
+    from pipecat_tail.report import session_summary
+
+    state = SessionState()
+    for n in range(101):
+        state.apply(tail("tail-latency", {"latency_secs": 0.5 if n < 51 else 2.0}))
+    summary = session_summary(state, state.selected)
+    assert summary["latency"]["on_target_answers"] == 51

@@ -90,6 +90,7 @@ class TailWebSocketServer:
         port: int = DEFAULT_PORT,
         buffer_size: int = DEFAULT_BUFFER_SIZE,
         on_client_connected: Optional[Callable[[], Awaitable[None]]] = None,
+        keepalive: bool = True,
     ):
         """Initialize the server.
 
@@ -100,6 +101,7 @@ class TailWebSocketServer:
                 connects. The oldest messages are dropped first.
             on_client_connected: Called after the buffered messages have been
                 replayed to a new client.
+            keepalive: Ping the client, and drop it when it doesn't answer.
         """
         self._host = host
         self._port = port
@@ -108,6 +110,7 @@ class TailWebSocketServer:
         self._run = uuid.uuid4().hex[:12]
         self._seq = 0
         self._on_client_connected = on_client_connected
+        self._keepalive = keepalive
         self._client = None
         self._server = None
         self._send_queue: Optional[asyncio.Queue] = None
@@ -126,7 +129,13 @@ class TailWebSocketServer:
 
         self._send_queue = asyncio.Queue()
         self._send_task = asyncio.create_task(self._send_task_handler())
-        self._server = await serve(self._client_handler, self._host, self._port)
+        self._server = await serve(
+            self._client_handler,
+            self._host,
+            self._port,
+            # 20 s is websockets' own default.
+            ping_interval=20.0 if self._keepalive else None,
+        )
         if not self._port:
             self._port = list(self._server.sockets)[0].getsockname()[1]
         logger.debug(f"ᓚᘏᗢ Tail running at {self.url}")

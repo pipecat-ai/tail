@@ -191,7 +191,9 @@ class LogsView(Vertical):
         self.search.focus()
 
     def close_search(self) -> None:
-        """Hide the search box."""
+        """End the search: hide the box and show every line again."""
+        self.search.value = ""
+        self.set_pattern("")
         self.search.display = False
         self.lines.focus()
 

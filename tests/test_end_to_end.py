@@ -9,6 +9,7 @@ workers and the bus.
 import asyncio
 import contextlib
 import dataclasses
+import gc
 import json
 import math
 import os
@@ -16,6 +17,7 @@ import socket
 import struct
 import subprocess
 import threading
+import weakref
 
 import pytest
 import websockets
@@ -259,7 +261,10 @@ async def test_rtvi_params_of_your_own_keep_the_conversation():
     async def on_message(message):
         received.append(message)
 
-    params = compat.rtvi_params()
+    # Pipecat's defaults, and the speaking states and the bot's output off.
+    params = compat.rtvi_params(
+        user_speaking_enabled=False, bot_speaking_enabled=False, bot_output_enabled=False
+    )
     await run_pipeline(
         "bot-12", lambda _: TailObserver(sink=CallbackSink(on_message), params=params)
     )
@@ -638,6 +643,23 @@ async def test_closing_the_app_here_stops_the_bot(monkeypatch):
 
 @needs_workers
 @pytest.mark.asyncio
+async def test_the_dashboards_connection_never_times_out(monkeypatch):
+    """A dashboard busy drawing for a while mustn't lose its connection and
+    quit, stopping the bot as if the user had."""
+    from pipecat_tail import dashboard
+
+    fresh_dashboard(monkeypatch, lambda url: FakeAppProcess(url, [], "quit"))
+    closed = dashboard.DASHBOARD.open("DEBUG")
+    await asyncio.sleep(0.3)
+    server = dashboard.DASHBOARD.server
+    assert server is not None and not server._keepalive
+    closed.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await asyncio.wait_for(closed, 10.0)
+
+
+@needs_workers
+@pytest.mark.asyncio
 async def test_the_app_crashing_leaves_the_bot_running(monkeypatch):
     """Only the user quitting stops the bot; a crashed app exits with 1."""
     from pipecat.pipeline.worker import PipelineWorker
@@ -815,7 +837,8 @@ async def test_setup_tail_from_a_setup_file(monkeypatch, tmp_path):
 @needs_workers
 @pytest.mark.asyncio
 async def test_setup_tail_gives_a_runner_one_tail_worker(monkeypatch, tmp_path):
-    """Every pipeline on a runner reports through the same TailWorker."""
+    """Every pipeline on a runner reports through the same TailWorker, and
+    the runner and its TailWorker go together once the run is over."""
     from pipecat.pipeline.worker import PipelineWorker
 
     from pipecat_tail import setup as setup_module
@@ -825,20 +848,28 @@ async def test_setup_tail_gives_a_runner_one_tail_worker(monkeypatch, tmp_path):
     setup = tmp_path / "tail_setup.py"
     setup.write_text(SETUP_FILE.format(out=str(tmp_path / "messages.jsonl")))
     monkeypatch.setenv("PIPECAT_SETUP_FILES", str(setup))
+
+    async def run() -> tuple[weakref.ref, set[str]]:
+        workers = [
+            PipelineWorker(Pipeline([FakeLLM(name="proc")]), name=name, idle_timeout_secs=None)
+            for name in ("bot-14", "bot-15")
+        ]
+        runner = WorkerRunner(handle_sigint=False)
+        await runner.add_workers(*workers)
+        run_task = asyncio.create_task(runner.run())
+        await asyncio.sleep(0.8)
+        for worker in workers:
+            await worker.queue_frames(frames("proc"))
+        await asyncio.wait_for(run_task, 15.0)
+        return weakref.ref(runner), set(getattr(runner, setup_module._TAIL_WORKER)._observed)
+
     logger.remove()
-    workers = [
-        PipelineWorker(Pipeline([FakeLLM(name="proc")]), name=name, idle_timeout_secs=None)
-        for name in ("bot-14", "bot-15")
-    ]
-    runner = WorkerRunner(handle_sigint=False)
-    await runner.add_workers(*workers)
-    run_task = asyncio.create_task(runner.run())
-    await asyncio.sleep(0.8)
-    for worker in workers:
-        await worker.queue_frames(frames("proc"))
-    await asyncio.wait_for(run_task, 15.0)
+    gone, observed = await run()
     logger.add(lambda _: None)
-    assert set(setup_module._tails[runner]._observed) == {"bot-14", "bot-15"}
+    assert observed == {"bot-14", "bot-15"}
+    await asyncio.sleep(0.2)
+    gc.collect()
+    assert gone() is None
 
 
 def test_audio_level_follows_loudness():

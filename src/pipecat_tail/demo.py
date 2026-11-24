@@ -416,6 +416,7 @@ class _Writer:
                     "user-input",
                     "llm-marker",
                     "workers",
+                    "interruptions",
                 ],
             },
             worker=None,
@@ -482,6 +483,7 @@ class _Writer:
                     "user-input",
                     "vad",
                     "workers",
+                    "interruptions",
                 ],
             },
         )
