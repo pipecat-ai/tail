@@ -1,56 +1,212 @@
-LeftPanel {
-    border: $primary;
-    width: 20%;
+Screen {
+    layout: vertical;
+    background: $background;
 }
 
-MiddlePanel {
-    width: 60%;
+#views {
+    height: 1fr;
 }
 
-RightPanel {
-    border: $primary;
-    padding: 1;
-    width: 20%;
+#views > * {
+    height: 1fr;
 }
 
-Conversation {
-    border: $primary;
-    height: 60%;
+/*
+ * Panels are sections under a rule: the title sits in the line, with no box
+ * around the panel, so the side pane keeps its columns. A panel beside
+ * another keeps a line on its left.
+ */
+
+#voice,
+#live-conversation,
+#pipeline-flow,
+#startup,
+#worker-tree,
+#jobs-table,
+#bus-feed,
+#waterfall-panel,
+#stage-stats,
+#histogram,
+#speech-lanes,
+#service-latency,
+#usage,
+#log-lines {
+    border: none;
+    border-top: solid $border;
+    border-title-color: $text-muted;
+    border-title-style: bold;
+    background: $background;
 }
 
-SystemLogs {
-    border: $primary;
-    height: 40%;
+#pipeline-side,
+#histogram {
+    border-left: solid $border;
 }
 
-SystemInfo {
-    border: $primary;
+#startup,
+#worker-tree,
+#bus-feed,
+#log-lines {
+    padding: 0 1;
 }
 
-LLMServiceInfo {
-    border: $primary;
+/* What was said starts a line below its rule, and every view ends a line
+ * above the key line, unless the terminal is short. */
+#live-conversation {
+    padding: 1 1 0 1;
 }
 
-TTSServiceInfo {
-    border: $primary;
+#key-bar {
+    margin-top: 1;
 }
 
-ServiceMetrics {
-    height: 30%;
+Screen.-tiny #live-conversation,
+Screen.-short #live-conversation {
+    padding: 0 1;
 }
 
-AudioLevel {
-    height: 5%;
+Screen.-tiny #key-bar,
+Screen.-short #key-bar {
+    margin-top: 0;
 }
 
-ConnectedStatus {
-    color: $text-success;
+/* Metrics */
+
+#metrics-view {
+    height: 1fr;
 }
 
-DisconnectedStatus {
-    color: $text-primary;
+#service-latency,
+#usage {
+    height: auto;
+    padding: 0 1 1 1;
 }
 
-ErrorStatus {
-    color: $text-error;
+/* Startup */
+
+#startup {
+    overflow-y: auto;
+}
+
+/* Logs */
+
+#logs-view {
+    height: 1fr;
+}
+
+#log-toolbar {
+    height: auto;
+}
+
+#log-search {
+    width: 1fr;
+}
+
+#log-lines {
+    height: 1fr;
+}
+
+#log-pinned {
+    height: 1;
+    padding: 0 1;
+    background: $surface;
+}
+
+/* Notifications sit above the key bar. */
+
+Toast {
+    background: $panel;
+}
+
+/*
+ * Terminal sizes. The screen carries -narrow or -wide, and -tiny, -short,
+ * -tall or -huge (see TailApp's breakpoints). Tail often sits in a side pane
+ * next to the client, so the conversation and the time breakdown keep their
+ * room and the audio tracks give way.
+ */
+
+#voice {
+    height: 9;
+}
+
+Screen.-huge #voice {
+    height: 11;
+}
+
+Screen.-short #voice {
+    height: 6;
+}
+
+Screen.-tiny #voice {
+    display: none;
+}
+
+/* Looking back or after the call, the timeline keeps only its lanes. */
+LiveView.-looking-back #voice {
+    height: 3;
+}
+
+/* Narrow, the pipeline's panels stack and the view scrolls. */
+Screen.-narrow #pipeline {
+    overflow-y: auto;
+}
+
+Screen.-narrow #pipeline-top {
+    layout: vertical;
+    height: auto;
+}
+
+Screen.-narrow #pipeline-flow,
+Screen.-narrow #pipeline-side {
+    width: 100%;
+    height: auto;
+}
+
+Screen.-narrow #pipeline-side {
+    border-left: none;
+}
+
+Screen.-narrow #startup {
+    max-height: 24;
+}
+
+Screen.-narrow #worker-tree {
+    height: auto;
+    max-height: 12;
+}
+
+Screen.-narrow #jobs-table {
+    height: auto;
+    max-height: 10;
+}
+
+Screen.-narrow #bus-feed {
+    height: 16;
+}
+
+/* Narrow, the current turn's breakdown moves under the clock. */
+Screen.-narrow #hud {
+    height: 6;
+}
+
+#waterfall-panel {
+    min-height: 6;
+}
+
+Screen.-short #speech-lanes,
+Screen.-tiny #speech-lanes {
+    display: none;
+}
+
+Screen.-tiny #latency-bottom {
+    height: 10;
+}
+
+Screen.-narrow #histogram {
+    display: none;
+}
+
+Screen.-tiny SplashPulse,
+Screen.-tiny SplashHowTo {
+    margin: 1 0 0 0;
 }

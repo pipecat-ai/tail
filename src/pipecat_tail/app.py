@@ -4,459 +4,771 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Textual-based dashboard for Pipecat.
+"""The Tail Textual application.
 
-This module defines a Textual-based application composed of three panels (left,
-middle, right). It receives RTVI messages and updates widgets such as metrics,
-conversation transcript, system logs, and audio levels.
+``TailApp`` receives wire messages through ``handle_message()``, folds them
+into a ``SessionState`` and refreshes the widgets that show what changed.
+The status line, the HUD and the key line stay on every view; five views
+hold the detail:
+
+1. Live: the voice timeline over the conversation, every turn, following
+   the latest; ``n``, ``p`` and ``/`` look back through it. Before a bot connects,
+   the waiting screen.
+2. Latency: where the time goes, turn by turn.
+3. Pipeline: processors and frame flow, startup timing, workers, jobs and
+   the bus.
+4. Metrics: service latency and usage.
+5. Logs.
+
+The app knows nothing about where messages come from. The standalone CLI feeds
+it from a websocket or the demo; ``TailWorker`` shows it in the bot's own
+terminal by running that CLI.
 """
 
-from typing import Any, Awaitable, Callable, Dict, Mapping, Optional
+import datetime
+import time
+import traceback
+from pathlib import Path
+from typing import Any, Awaitable, Callable, Optional, Sequence
 
-from loguru import logger
-
-try:
-    # pipecat >= 0.0.105
-    from pipecat.processors.frameworks.rtvi.models import (
-        MESSAGE_LABEL as RTVI_MESSAGE_LABEL,
-    )
-    from pipecat.processors.frameworks.rtvi.models import (
-        BotAudioLevelMessage as RTVIBotAudioLevelMessage,
-    )
-    from pipecat.processors.frameworks.rtvi.models import (
-        BotTTSTextMessage as RTVIBotTTSTextMessage,
-    )
-    from pipecat.processors.frameworks.rtvi.models import (
-        MetricsMessage as RTVIMetricsMessage,
-    )
-    from pipecat.processors.frameworks.rtvi.models import (
-        SystemLogMessage as RTVISystemLogMessage,
-    )
-    from pipecat.processors.frameworks.rtvi.models import (
-        UserAudioLevelMessage as RTVIUserAudioLevelMessage,
-    )
-    from pipecat.processors.frameworks.rtvi.models import (
-        UserTranscriptionMessage as RTVIUserTranscriptionMessage,
-    )
-except ImportError:
-    from pipecat.processors.frameworks.rtvi import (
-        RTVI_MESSAGE_LABEL,
-        RTVIBotAudioLevelMessage,
-        RTVIBotTTSTextMessage,
-        RTVIMetricsMessage,
-        RTVISystemLogMessage,
-        RTVIUserAudioLevelMessage,
-        RTVIUserTranscriptionMessage,
-    )
-from pydantic import ValidationError
+from textual import events, on
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Header, Label, Rule, Static
+from textual.widgets import ContentSwitcher, Input
 
-from pipecat_tail.rtvi import RTVITailReadyMessage
-from pipecat_tail.widgets.audio_level import AudioLevel
-from pipecat_tail.widgets.conversation import Conversation
-from pipecat_tail.widgets.llm_service_info import LLMServiceInfo
-from pipecat_tail.widgets.service_metrics import ServiceMetrics
-from pipecat_tail.widgets.system_info import SystemInfo
-from pipecat_tail.widgets.system_logs import SystemLogs
-from pipecat_tail.widgets.system_status import SystemStatus
-from pipecat_tail.widgets.tts_service_info import TTSServiceInfo
+from pipecat_tail.state import (
+    BUS,
+    CONVERSATION,
+    ERRORS,
+    FLOW,
+    JOBS,
+    LATENCY,
+    LOGS,
+    METRICS,
+    STARTUP,
+    STATUS,
+    STRIP,
+    THINKING,
+    VOICE,
+    WORKERS,
+    SessionState,
+    Turn,
+)
+from pipecat_tail.widgets import palette
+from pipecat_tail.widgets.dialog import QuitDialog
+from pipecat_tail.widgets.ended import CallEnded
+from pipecat_tail.widgets.flow import PipelineFlow
+from pipecat_tail.widgets.hud import ErrorBanner, Hud, KeyBar, TitleBar
+from pipecat_tail.widgets.inspector import TurnInspector
+from pipecat_tail.widgets.latency import LatencyView
+from pipecat_tail.widgets.logs import LogsView
+from pipecat_tail.widgets.metrics import MetricsView, StartupPanel
+from pipecat_tail.widgets.splash import HelpScreen, Splash
+from pipecat_tail.widgets.turns import ConversationView, TurnBlock
+from pipecat_tail.widgets.voice import VoiceTimeline
+from pipecat_tail.widgets.workers import BusFeed, JobsTable, WorkerTree
+
+Hook = Callable[[], Awaitable[None]]
+
+VIEW_IDS = {
+    "live": "live",
+    "latency": "latency-view",
+    "pipeline": "pipeline",
+    "metrics": "metrics-view",
+    "logs": "logs-view",
+}
+
+FLUSH_INTERVAL_SECS = 0.05
+TICK_INTERVAL_SECS = 1 / 12
+SLOW_TICK_SECS = 0.5
+SPLASH_FRAME_SECS = 0.2
+FLOW_FRAME_SECS = 0.25
 
 
-class LeftPanel(Static):
-    """Left-side panel showing service metrics.
+class LiveView(Vertical):
+    """The waiting screen, or the voice timeline over the conversation.
 
-    Maintains a set of ``ServiceMetrics`` widgets keyed by processor name and
-    appends new values as metrics arrive.
+    Looking back (following paused) or once the call is over, the timeline
+    keeps only its lanes, so the conversation has the room.
     """
 
-    def __init__(self):
-        """Initialize the panel and its internal container state."""
-        super().__init__()
-        self._metrics: Dict[str, ServiceMetrics] = {}
-        self._vertical = Vertical()
+    DEFAULT_CSS = """
+    LiveView { height: 1fr; }
+    LiveView #live-body { height: 1fr; }
+    LiveView #live-conversation { height: 1fr; }
+    LiveView #live-search { height: auto; }
+    """
+
+    def __init__(self, state: SessionState, url: str, demo_hint: bool):
+        """Create the view."""
+        super().__init__(id="live")
+        self.splash = Splash(state, url, demo_hint=demo_hint)
+        self.voice = VoiceTimeline(state)
+        self.conversation = ConversationView(
+            id="live-conversation",
+            now=state.now,
+            errors=lambda: state.errors_for(state.selected),
+        )
+        self.search = Input(
+            placeholder="search what was said, Enter to find, Esc to close", id="live-search"
+        )
 
     def compose(self) -> ComposeResult:
-        """Compose the service metrics layout."""
-        yield Label("Metrics")
-        yield self._vertical
+        """Lay out the view."""
+        yield self.splash
+        with Vertical(id="live-body"):
+            yield self.voice
+            yield self.conversation
+            yield self.search
 
-    async def handle_metrics_ttfb_data(self, data: Mapping[str, Any]):
-        """Handle a TTFB metrics entry.
+    def on_mount(self) -> None:
+        """Start on the waiting screen."""
+        self.show_splash(True)
+        self.search.display = False
 
-        Args:
-            data: A dict with keys ``processor`` and ``value``.
-        """
-        processor = data["processor"]
-        value = data["value"]
-        if not processor in self._metrics:
-            # Metrics
-            widget = ServiceMetrics(processor)
-            self._metrics[processor] = widget
-            self._vertical.mount(widget)
-            widget.scroll_visible()
-            # Rule
-            rule = Rule()
-            self._vertical.mount(rule)
-            rule.scroll_visible()
-        # Update metrics
-        self._metrics[processor].add_value(value)
+    def show_splash(self, show: bool) -> None:
+        """Switch between the waiting screen and the live panels."""
+        self.splash.display = show
+        self.query_one("#live-body").display = not show
 
+    def set_looking_back(self, looking_back: bool) -> None:
+        """Keep only the timeline's lanes while looking back or after the call."""
+        self.set_class(looking_back, "-looking-back")
 
-class MiddlePanel(Static):
-    """Middle panel with conversation transcript and system logs."""
+    def open_search(self) -> None:
+        """Show the search box with the current search in it."""
+        self.search.value = self.conversation.search_text or ""
+        self.search.display = True
+        self.search.focus()
 
-    def __init__(self):
-        """Initialize the middle panel."""
-        super().__init__()
-        self._logs = SystemLogs()
-        self._conversation = Conversation()
-
-    def compose(self) -> ComposeResult:
-        """Compose the conversation and logs layout."""
-        with Vertical():
-            yield self._conversation
-            yield self._logs
-
-    async def append_log(self, message):
-        """Append a system log line.
-
-        Args:
-            message: Text to append to logs.
-        """
-        await self._logs.append_log(message)
-
-    async def handle_user_started_speaking(self):
-        """Notify that the user started speaking."""
-        await self._conversation.handle_user_started_speaking()
-
-    async def handle_user_stopped_speaking(self):
-        """Notify that the user stopped speaking."""
-        await self._conversation.handle_user_stopped_speaking()
-
-    async def handle_user_transcription(self, text: str):
-        """Append user transcription to the conversation.
-
-        Args:
-            text: Transcribed user text.
-        """
-        await self._conversation.handle_user_transcription(text)
-
-    async def handle_bot_started_speaking(self):
-        """Notify that the bot started speaking."""
-        await self._conversation.handle_bot_started_speaking()
-
-    async def handle_bot_stopped_speaking(self):
-        """Notify that the bot stopped speaking."""
-        await self._conversation.handle_bot_stopped_speaking()
-
-    async def handle_bot_transcription(self, text: str):
-        """Append bot transcription to the conversation.
-
-        Args:
-            text: Bot TTS text.
-        """
-        await self._conversation.handle_bot_transcription(text)
+    def close_search(self) -> None:
+        """Hide the search box; the search stays until ``esc`` ends it."""
+        self.search.display = False
+        self.app.set_focus(None)
 
 
-class RightPanel(Static):
-    """Right panel with system info and audio levels."""
+class PipelineView(Vertical):
+    """Processors and their flow, startup timing, workers, jobs and the bus."""
 
-    def __init__(self):
-        """Initialize widgets for system info and audio level meters."""
-        super().__init__()
-        self._system_info = SystemInfo()
-        self._system_status = SystemStatus()
-        self._user_audio_level = AudioLevel("User")
-        self._bot_audio_level = AudioLevel("Bot")
-        self._llm_service_info = LLMServiceInfo()
-        self._tts_service_info = TTSServiceInfo()
+    DEFAULT_CSS = """
+    PipelineView { height: 1fr; }
+    PipelineView #pipeline-top { height: 3fr; }
+    PipelineView #pipeline-flow { width: 3fr; }
+    PipelineView #pipeline-side { width: 2fr; }
+    PipelineView #startup { height: auto; max-height: 50%; }
+    PipelineView #worker-tree { height: 1fr; }
+    PipelineView #jobs-table { height: 1fr; }
+    PipelineView #bus-feed { height: 2fr; }
+    """
+
+    def __init__(self, state: SessionState):
+        """Create the view."""
+        super().__init__(id="pipeline")
+        self.flow = PipelineFlow(state, id="pipeline-flow")
+        self.startup = StartupPanel()
+        self.worker_tree = WorkerTree()
+        self.jobs = JobsTable()
+        # Shown once there are jobs: an empty table says nothing.
+        self.jobs.display = False
+        self.bus = BusFeed()
 
     def compose(self) -> ComposeResult:
-        """Compose the system info and audio level widgets."""
-        with Vertical():
-            yield self._system_info
-            yield Rule()
-            yield self._system_status
-            yield Rule()
-            yield self._user_audio_level
-            yield Rule()
-            yield self._bot_audio_level
-            yield Rule()
-            yield Label("LLM usage")
-            yield self._llm_service_info
-            yield Rule()
-            yield Label("TTS usage")
-            yield self._tts_service_info
+        """Lay out the view."""
+        with Horizontal(id="pipeline-top"):
+            yield self.flow
+            with Vertical(id="pipeline-side"):
+                yield self.startup
+                yield self.worker_tree
+                yield self.jobs
+        yield self.bus
 
-    async def handle_system_info(self, info: Mapping[str, Any]):
-        """Update the system info panel.
 
-        Args:
-            info: Mapping of system information.
-        """
-        self._system_info.update_system_info(info)
-
-    async def handle_system_status(self, status: str):
-        """Update the system status panel.
-
-        Args:
-            status: Current status.
-        """
-        self._system_status.update_status(status)
-
-    async def handle_user_audio_level(self, level: float):
-        """Update the user audio level meter.
-
-        Args:
-            level: Normalized audio level for the user.
-        """
-        self._user_audio_level.update_level(level)
-
-    async def handle_bot_audio_level(self, level: float):
-        """Update the bot audio level meter.
-
-        Args:
-            level: Normalized audio level for the bot.
-        """
-        self._bot_audio_level.update_level(level)
-
-    async def handle_services_info(self, info: Mapping[str, Any]):
-        """Update services info.
-
-        Args:
-            info: Services information (tokens, characters, ...).
-        """
-        if "tokens" in info:
-            self._llm_service_info.update_tokens(info["tokens"])
-        if "characters" in info:
-            self._tts_service_info.update_characters(info["characters"])
+def _newest(records: Sequence[Any]) -> Any:
+    return records[-1] if records else None
 
 
 class TailApp(App):
-    """Main Textual application orchestrating the UI and message handling."""
+    """Main Textual application."""
 
     CSS_PATH = "tail.tcss"
+    AUTO_FOCUS = None
+    # Classes the screen gets by terminal size; tail.tcss lays views out by them.
+    HORIZONTAL_BREAKPOINTS = [(0, "-narrow"), (110, "-wide")]
+    VERTICAL_BREAKPOINTS = [(0, "-tiny"), (27, "-short"), (36, "-tall"), (48, "-huge")]
+    TITLE = "Tail"
+    SUB_TITLE = "A terminal for voice agents"
 
     BINDINGS = [
-        ("c", "connect", "Connect"),
-        ("q", "quit", "Exit"),
+        Binding("1", "show_view('live')", "Live", show=False),
+        Binding("2", "show_view('latency')", "Latency", show=False),
+        Binding("3", "show_view('pipeline')", "Pipeline", show=False),
+        Binding("4", "show_view('metrics')", "Metrics", show=False),
+        Binding("5", "show_view('logs')", "Logs", show=False),
+        Binding("enter", "inspect", "Inspect", show=False),
+        Binding("up", "move(-1)", "Previous turn", show=False),
+        Binding("down", "move(1)", "Next turn", show=False),
+        Binding("f", "follow", "Follow", show=False),
+        Binding("n", "jump(1)", "Next issue", show=False),
+        Binding("p", "jump(-1)", "Previous issue", show=False),
+        Binding("escape", "end_search", "End search", show=False),
+        Binding("plus,equals_sign", "zoom(1)", "More time", show=False),
+        Binding("minus", "zoom(-1)", "Less time", show=False),
+        Binding("slash", "search", "Search", show=False),
+        Binding("l", "level", "Level", show=False),
+        Binding("b", "bus_filter", "Bus filter", show=False),
+        Binding("e", "latest_error", "Error", show=False),
+        Binding("x", "dismiss_error", "Dismiss", show=False),
+        Binding("w", "next_worker", "Worker", show=False),
+        Binding("t", "next_theme", "Theme", show=False),
+        Binding("question_mark", "help", "Help", show=False),
+        Binding("c", "connect", "Connect", show=False),
+        Binding("s", "save_report", "Save report", show=False),
+        Binding("q", "request_quit", "Quit", show=False),
     ]
 
     def __init__(
         self,
         *,
-        on_mount: Optional[Callable[[], Awaitable[None]]] = None,
-        on_shutdown: Optional[Callable[[], Awaitable[None]]] = None,
-        action_connect: Optional[Callable[[], Awaitable[None]]] = None,
+        on_mount: Optional[Hook] = None,
+        on_shutdown: Optional[Hook] = None,
+        action_connect: Optional[Hook] = None,
+        url: str = "",
+        demo_hint: bool = True,
+        report_path: Optional[Path] = None,
     ):
-        """Initialize the Tail Textual app.
+        """Initialize the app.
 
         Args:
-            on_mount: Optional hook called when the UI mounts.
-            on_shutdown: Optional hook called before quitting.
-            action_connect: Optional hook called to start a connection.
+            on_mount: Called when the UI has mounted.
+            on_shutdown: Called before the app quits.
+            action_connect: Called when the user asks to (re)connect.
+            url: Where the app is listening for a bot, for the waiting screen.
+            demo_hint: Whether the waiting screen mentions the demo.
+            report_path: Where to write a report of the session on quit.
         """
         super().__init__()
         self._on_mount = on_mount
         self._on_shutdown = on_shutdown
         self._action_connect = action_connect
+        self._report_path = report_path
 
-        self._left_panel = LeftPanel()
-        self._middle_panel = MiddlePanel()
-        self._right_panel = RightPanel()
+        self.state = SessionState()
+        self._dirty: set[str] = set()
+        self._new_bus: list = []
+        self._new_logs: list = []
+        self._told_skipping = False
+        # The call the end of which was last announced, as (worker, started).
+        self._announced_call: Optional[tuple[Optional[str], Optional[float]]] = None
+        self._last_slow_tick = 0.0
+        self._last_frame: dict[str, float] = {}
+        self.view = "live"
 
-    async def on_mount(self):
-        """Set up theme, titles, and invoke optional mount hook."""
-        self.theme = "nord"
-        self.title = "Tail"
-        self.sub_title = "A terminal dashboard for Pipecat"
+        self.title_bar = TitleBar(self.state)
+        self.hud = Hud(self.state)
+        self.banner = ErrorBanner(self.state)
+        self.key_bar = KeyBar()
+        self.live = LiveView(self.state, url, demo_hint)
+        self.latency_view = LatencyView(self.state)
+        self.pipeline_view = PipelineView(self.state)
+        self.metrics_view = MetricsView()
+        self.logs_view = LogsView()
+
+    #
+    # Layout and lifecycle
+    #
+
+    def compose(self) -> ComposeResult:
+        """Compose the chrome around the views."""
+        yield self.title_bar
+        yield self.hud
+        yield self.banner
+        with ContentSwitcher(initial="live", id="views"):
+            yield self.live
+            yield self.latency_view
+            yield self.pipeline_view
+            yield self.metrics_view
+            yield self.logs_view
+        yield self.key_bar
+
+    async def on_mount(self) -> None:
+        """Apply the theme, bind widgets to the state and start ticking."""
+        for theme in palette.THEMES:
+            self.register_theme(theme)
+        self.theme_changed_signal.subscribe(self, self._on_theme_changed)
+        self.theme = "tail"
+        self.hud.display = False
+        self.live.conversation.can_focus = False
+        self.logs_view.bind_state(self.state)
+        self._bind_session()
+        self.set_interval(FLUSH_INTERVAL_SECS, self._flush_dirty)
+        self.set_interval(TICK_INTERVAL_SECS, self._tick)
         if self._on_mount:
             await self._on_mount()
 
-    async def action_connect(self):
-        """Action to invoke the optional connect hook."""
-        if self._action_connect:
-            await self._action_connect()
+    async def action_request_quit(self) -> None:
+        """Quit, asking first once there's a session to lose.
 
-    async def action_quit(self):
-        """Action to cleanly shutdown and then quit the app."""
+        In the bot's own terminal quitting stops the bot too, and the dialog
+        says so while a call is on.
+        """
+        if not self.state.has_bot:
+            await self.action_quit()
+            return
+        if isinstance(self.screen, QuitDialog):
+            return
+        if isinstance(self.screen, CallEnded):
+            self.screen.dismiss()
+        stops_bot = bool(self.state.info.get("quit_stops_bot")) and self.state.call_on
+        self.push_screen(QuitDialog(stops_bot=stops_bot), callback=self._quit_or_stay)
+
+    async def _quit_or_stay(self, quit: Optional[bool]) -> None:
+        if quit:
+            await self.action_quit()
+        else:
+            # A call that ended while the dialog was up still gets its say.
+            self._show_call_end()
+
+    async def action_quit(self) -> None:
+        """Run the shutdown hook and quit."""
         if self._on_shutdown:
             await self._on_shutdown()
         await super().action_quit()
 
-    def compose(self) -> ComposeResult:
-        """Compose the app layout with header, three panels, and footer."""
-        # Header
-        yield Header(show_clock=True)
-        # Main horizontal panels
-        with Horizontal():
-            yield self._left_panel
-            yield self._middle_panel
-            yield self._right_panel
-        # Footer
-        yield Footer()
+    def on_unmount(self) -> None:
+        """Write the report if asked to, however the app ends.
 
-    async def clear(self):
-        """Clear system status, audio levels and other UI elements."""
-        await self._right_panel.handle_user_audio_level(0)
-        await self._right_panel.handle_bot_audio_level(0)
-        await self._right_panel.handle_system_status("DISCONNECTED")
+        Quitting is one way; `--exit-on-disconnect` ends it when the bot goes.
+        """
+        if self._report_path is not None and self.state.has_bot:
+            from pipecat_tail.report import write_report
 
-    async def handle_message(self, message: Dict[str, Any]):
-        """Validate and dispatch incoming messages to handlers.
+            try:
+                write_report(self.state, self._report_path)
+            except OSError:
+                pass
+
+    def _on_theme_changed(self, theme) -> None:
+        palette.use_dark(theme.dark)
+        self.live.splash.redraw()
+        # Plain widgets keep the colors they were drawn with until redrawn.
+        self.key_bar.refresh()
+        self.banner.refresh()
+        self.live.conversation.update_legend()
+        self.refresh(layout=True)
+        self._dirty |= {CONVERSATION, LATENCY, METRICS, STRIP, FLOW, VOICE, STARTUP, LOGS}
+        self.live.conversation.sync(self.state.selected, full=True)
+        # The log and bus feeds are written once, in the colors of the time.
+        self.logs_view.rebuild()
+        self.pipeline_view.bus.rebuild(self.state)
+
+    def _bind_session(self) -> None:
+        session = self.state.selected
+        self.live.conversation.sync(session, full=True)
+        self.metrics_view.set_session(session)
+        self.pipeline_view.startup.set_session(session)
+        self.latency_view.waterfall.cursor = None
+        self.latency_view.refresh_view()
+
+    #
+    # Messages
+    #
+
+    async def handle_message(self, message: dict[str, Any]) -> None:
+        """Fold one wire message into the state and schedule a refresh.
+
+        A message Tail fails on is skipped, and said so in the logs: the
+        messages after it still arrive.
 
         Args:
-            message: Raw message dictionary, expected to follow RTVI schema.
+            message: A decoded wire message.
         """
         try:
-            if message.get("label") != RTVI_MESSAGE_LABEL:
-                logger.warning(f"Ignoring non-RTVI message: {message}")
-                return
-            await self._handle_message(message)
-        except ValidationError as e:
-            logger.warning(f"Invalid RTVI message (error: {e}): {message}")
+            self._fold(message)
+        except Exception as e:
+            self._skip(message, e)
 
-    async def _handle_message(self, message: Dict[str, Any]):
-        """Route a parsed RTVI message to the appropriate handler.
+    def _skip(self, message: dict[str, Any], error: Exception) -> None:
+        frame = traceback.extract_tb(error.__traceback__)[-1]
+        where = f"{Path(frame.filename).name}:{frame.lineno}"
+        text = f"skipped a {message.get('type')} message: {type(error).__name__}: {error} ({where})"
+        log = {
+            "level": "ERROR",
+            "name": "pipecat_tail",
+            "function": "handle_message",
+            "message": text,
+        }
+        log["time"] = datetime.datetime.now().astimezone().isoformat()
+        self._fold({"label": "tail", "type": "tail-log", "data": log})
+        if not self._told_skipping:
+            self._told_skipping = True
+            self.notify(
+                "Tail skipped a message it failed on: see Logs", severity="error", timeout=8
+            )
 
-        Args:
-            message: Message with a ``type`` field and associated data.
-        """
-        msg_type = message.get("type")
-        if not msg_type:
-            logger.warning(f"Ignoring non-RTVI message: {message}")
+    def _fold(self, message: dict[str, Any]) -> None:
+        last_bus = _newest(self.state.bus)
+        last_log = _newest(self.state.logs)
+        before_workers = set(self.state.sessions)
+        before_selected = self.state.sessions.get(self.state.selected_worker)
+        areas = self.state.apply(message)
+        if not areas:
             return
-        match msg_type:
-            case "tail-ready":
-                rtvi_message = RTVITailReadyMessage.model_validate(message)
-                await self.handle_tail_ready(rtvi_message.data)
-            case "tail-pipeline-finished":
-                await self.handle_tail_pipeline_finished()
-            case "user-started-speaking":
-                await self.handle_user_started_speaking()
-            case "user-stopped-speaking":
-                await self.handle_user_stopped_speaking()
-            case "user-audio-level":
-                rtvi_message = RTVIUserAudioLevelMessage.model_validate(message)
-                await self.handle_user_audio_level(rtvi_message.data.value)
-            case "user-transcription":
-                rtvi_message = RTVIUserTranscriptionMessage.model_validate(message)
-                if rtvi_message.data.final:
-                    await self.handle_user_transcription(rtvi_message.data.text)
-            case "bot-started-speaking":
-                await self.handle_bot_started_speaking()
-            case "bot-stopped-speaking":
-                await self.handle_bot_stopped_speaking()
-            case "bot-audio-level":
-                rtvi_message = RTVIBotAudioLevelMessage.model_validate(message)
-                await self.handle_bot_audio_level(rtvi_message.data.value)
-            case "bot-tts-text":
-                rtvi_message = RTVIBotTTSTextMessage.model_validate(message)
-                await self.handle_bot_transcription(rtvi_message.data.text)
-            case "metrics":
-                rtvi_message = RTVIMetricsMessage.model_validate(message)
-                await self.handle_metrics(rtvi_message.data)
-                await self.handle_services_info(rtvi_message.data)
-            case "system-log":
-                rtvi_message = RTVISystemLogMessage.model_validate(message)
-                await self.handle_system_log(rtvi_message.data.text)
+        # The record lists are capped, so a new record shows as a new last one.
+        if BUS in areas and _newest(self.state.bus) is not last_bus:
+            self._new_bus.append(self.state.bus[-1])
+        if LOGS in areas and _newest(self.state.logs) is not last_log:
+            self._new_logs.append(self.state.logs[-1])
+        if set(self.state.sessions) != before_workers:
+            areas |= {WORKERS, STRIP, FLOW}
+        # Another session is in view: a new call, or a bot that restarted.
+        if self.state.sessions.get(self.state.selected_worker) is not before_selected:
+            self._bind_session()
+        self._dirty |= areas
 
-    async def handle_tail_ready(self, info: Mapping[str, Any]):
-        """Handle initial tail-ready message by updating system info.
+    async def handle_status(self, status: str, detail: Optional[str] = None) -> None:
+        """Update the connection status.
 
         Args:
-            info: System information.
+            status: ``connecting``, ``connected``, ``disconnected`` or ``error``.
+            detail: Optional detail, for example the error text.
         """
-        await self._right_panel.handle_system_info(info)
-        await self._right_panel.handle_system_status("CONNECTED")
+        self._dirty |= self.state.set_status(status, detail)
 
-    async def handle_tail_pipeline_finished(self):
-        """Reset audio meters when the pipeline has finished."""
-        await self.clear()
-
-    async def handle_user_started_speaking(self):
-        """Notify conversation that the user started speaking."""
-        await self._middle_panel.handle_user_started_speaking()
-
-    async def handle_user_stopped_speaking(self):
-        """Notify conversation that the user stopped speaking."""
-        await self._middle_panel.handle_user_stopped_speaking()
-
-    async def handle_user_audio_level(self, level: float):
-        """Update the user audio level meter from message data.
-
-        Args:
-            level: User audio level.
-        """
-        await self._right_panel.handle_user_audio_level(level)
-
-    async def handle_user_transcription(self, text: str):
-        """Append the latest user transcription.
-
-        Args:
-            text: User transcription.
-        """
-        await self._middle_panel.handle_user_transcription(text + " ")
-
-    async def handle_bot_started_speaking(self):
-        """Notify conversation that the bot started speaking."""
-        await self._middle_panel.handle_bot_started_speaking()
-
-    async def handle_bot_stopped_speaking(self):
-        """Notify conversation that the bot stopped speaking."""
-        await self._middle_panel.handle_bot_stopped_speaking()
-        await self._right_panel.handle_bot_audio_level(0)
-
-    async def handle_bot_audio_level(self, level: float):
-        """Update the bot audio level meter from message data.
-
-        Args:
-            level: Bot audio level.
-        """
-        await self._right_panel.handle_bot_audio_level(level)
-
-    async def handle_bot_transcription(self, text: str):
-        """Append the latest bot TTS text.
-
-        Args:
-            text: Bot transcription.
-        """
-        await self._middle_panel.handle_bot_transcription(text + " ")
-
-    async def handle_metrics(self, metrics: Mapping[str, Any]):
-        """Handle metrics payloads and update the services metrics panel.
-
-        Args:
-            metrics: RTVI metrics.
-        """
-        if not "ttfb" in metrics:
+    def _flush_dirty(self) -> None:
+        if not self._dirty:
             return
+        dirty, self._dirty = self._dirty, set()
+        session = self.state.selected
+        self.live.show_splash(not self.state.has_bot)
+        # The HUD has nothing to say before a bot shows up.
+        self.hud.display = self.state.has_bot
+        if STRIP in dirty or STATUS in dirty:
+            self.title_bar.refresh()
+            self.hud.refresh()
+            self._show_looking_back()
+            self._show_call_end()
+        if ERRORS in dirty:
+            self.banner.update_from()
+        if CONVERSATION in dirty:
+            self.live.conversation.sync(session)
+        if VOICE in dirty:
+            self.live.voice.refresh()
+        if LATENCY in dirty:
+            self.latency_view.refresh_view()
+            self.hud.refresh()
+        if METRICS in dirty:
+            self.metrics_view.refresh_view()
+        if STARTUP in dirty:
+            self.pipeline_view.startup.refresh_view()
+        if (FLOW in dirty or METRICS in dirty or ERRORS in dirty) and self.view == "pipeline":
+            self.pipeline_view.flow.refresh()
+        if WORKERS in dirty or STATUS in dirty:
+            self.pipeline_view.worker_tree.sync(self.state)
+            self._explain_pipeline_panels()
+        if JOBS in dirty:
+            self.pipeline_view.jobs.sync(self.state)
+            self.pipeline_view.jobs.display = bool(self.state.jobs)
+        if BUS in dirty:
+            for record in self._new_bus:
+                self.pipeline_view.bus.append(record)
+            self._new_bus.clear()
+        if LOGS in dirty:
+            for record in self._new_logs:
+                self.logs_view.append(record)
+            self._new_logs.clear()
+        if LOGS in dirty or ERRORS in dirty:
+            self.logs_view.refresh_pinned()
 
-        for metrics in metrics["ttfb"]:
-            await self._left_panel.handle_metrics_ttfb_data(metrics)
+    def _explain_pipeline_panels(self) -> None:
+        caps = self.state.capabilities
+        if caps and "workers" not in caps:
+            # Pipecat before 1.3 runs pipelines as tasks: no workers, jobs or bus.
+            note = "needs Pipecat 1.3+ (WorkerRunner)"
+        elif self.state.info.get("standalone"):
+            # A TailObserver on its own sees its pipeline, not the runner.
+            note = "needs a TailWorker"
+        else:
+            note = ""
+        view = self.pipeline_view
+        view.worker_tree.border_title = f"workers · {note}" if note else "workers"
+        view.jobs.border_title = f"jobs · {note}" if note else "jobs"
+        view.bus.note = note
+        view.bus._update_subtitle()
 
-    async def handle_system_log(self, text: str):
-        """Append system log messages.
+    def _tick(self) -> None:
+        """Animate what moves with time, and only that.
 
-        Args:
-            text: System log message.
+        While nobody speaks and the bot isn't thinking, the screen only
+        changes with the clock, so most widgets redraw twice a second. The
+        voice timeline scrolls one column at a time, and only while something
+        is in its window.
         """
-        await self._middle_panel.append_log(text)
+        tick = time.monotonic()
+        slow = tick - self._last_slow_tick >= SLOW_TICK_SECS
+        if slow:
+            self._last_slow_tick = tick
+            self.title_bar.refresh()
+        session = self.state.selected
+        now = self.state.now()
+        active = self.state.has_bot and session.is_active(now)
+        if active or slow:
+            self.hud.refresh()
+        if self.view == "live":
+            if self.live.splash.display:
+                if tick - self._last_frame.get("splash", 0.0) >= SPLASH_FRAME_SECS:
+                    self._last_frame["splash"] = tick
+                    self.live.splash.next_frame()
+            else:
+                voice = self.live.voice
+                if (
+                    voice.display
+                    and tick - self._last_frame.get("voice", 0.0) >= voice.frame_secs()
+                    and voice.has_motion(now)
+                ):
+                    self._last_frame["voice"] = tick
+                    voice.refresh()
+                if self._animating(session):
+                    self.live.conversation.tick()
+        elif self.view == "pipeline" and (active or slow):
+            if tick - self._last_frame.get("flow", 0.0) >= FLOW_FRAME_SECS:
+                self._last_frame["flow"] = tick
+                self.pipeline_view.flow.refresh()
+        if slow and self.view == "latency":
+            self.latency_view.refresh_lanes()
 
-    async def handle_system_status(self, status: str):
-        """Update system status.
+    def _animating(self, session) -> bool:
+        if session.bot_state_at(self.state.now()) == THINKING:
+            return True
+        turn = session.current_turn
+        return bool(turn and any(not c.settled for c in turn.function_calls))
 
-        Args:
-            status: System status.
+    #
+    # Actions
+    #
+
+    def action_show_view(self, view: str) -> None:
+        """Switch to a view."""
+        self.query_one("#views", ContentSwitcher).current = VIEW_IDS[view]
+        # Keys belong to the app unless a widget of this view takes them.
+        focused = self.focused
+        if (
+            focused is not None
+            and not self.query_one(f"#{VIEW_IDS[view]}") in focused.ancestors_with_self
+        ):
+            self.set_focus(None)
+        self.view = view
+        self.key_bar.set_view(view)
+        self._show_following()
+        # Logs written while their view was hidden wait for it to have a size.
+        self.call_after_refresh(self.logs_view.lines.render_deferred)
+        self.call_after_refresh(self.pipeline_view.bus.render_deferred)
+        if view == "latency":
+            self.latency_view.refresh_view()
+        elif view == "pipeline":
+            self.pipeline_view.flow.refresh()
+        elif view == "metrics":
+            self.metrics_view.refresh_view()
+
+    @on(KeyBar.ViewSelected)
+    def _on_view_selected(self, event: KeyBar.ViewSelected) -> None:
+        self.action_show_view(event.view)
+
+    @on(TurnBlock.Picked)
+    def _on_turn_picked(self, event: TurnBlock.Picked) -> None:
+        self._inspect(event.turn)
+
+    def _inspect(self, turn: Optional[Turn]) -> None:
+        if turn is None:
+            self.notify("No turns yet", timeout=1.5)
+            return
+        self.push_screen(TurnInspector(self.state.selected, turn, self.state.now))
+
+    def action_inspect(self) -> None:
+        """Open the turn inspector on the selected turn, or the last one."""
+        if self.view == "latency":
+            record = self.latency_view.waterfall.selected()
+            turn = self.state.selected.turn_by_number(record.turn) if record else None
+        else:
+            turn = self.live.conversation.current_or_last()
+        self._inspect(turn)
+
+    def action_move(self, step: int) -> None:
+        """Select the previous or next turn.
+
+        Selecting an earlier turn pauses following; coming back to the last
+        one resumes it.
         """
-        await self._right_panel.handle_system_status(status)
+        if self.view == "latency":
+            self.latency_view.waterfall.move(step)
+        elif self.view == "live":
+            self.live.conversation.move_selection(step)
+        self._show_following()
 
-    async def handle_services_info(self, info: Mapping[str, Any]):
-        """Handle metrics payloads and updates services info.
+    def action_jump(self, step: int) -> None:
+        """Jump to the next or previous issue (a match while searching), or error in the logs."""
+        if self.view == "logs":
+            if self.logs_view.jump(step) is None:
+                self.notify("No errors shown", timeout=1.5)
+            self._show_following()
+            return
+        if self.view != "live":
+            return
+        conversation = self.live.conversation
+        if conversation.jump(step) is None:
+            if conversation.search_text:
+                self.notify(f"Nothing mentions “{conversation.search_text}”", timeout=1.5)
+            else:
+                self.notify("Nothing went wrong so far", timeout=1.5)
+        self._show_following()
 
-        Args:
-            info: Services info (usage tokens, etc.).
-        """
-        await self._right_panel.handle_services_info(info)
+    def action_follow(self) -> None:
+        """Toggle auto-scroll on the conversation or the logs."""
+        if self.view == "logs":
+            following = self.logs_view.toggle_follow()
+        else:
+            following = self.live.conversation.toggle_follow()
+            if following:
+                # Back to the latest turn: ⏎, ↑ and n start from there again.
+                self.live.conversation.select(None)
+        self._show_following()
+        self.notify("Following" if following else "Paused", timeout=1.5)
+
+    def _show_following(self) -> None:
+        """Tell the key bar whether the current view follows what's new and searches."""
+        following = {
+            "live": self.live.conversation.following,
+            "logs": self.logs_view.following,
+        }.get(self.view, True)
+        self.key_bar.set_following(following)
+        self.key_bar.set_searching(bool(self.live.conversation.search_text))
+        self._show_looking_back()
+
+    def _show_looking_back(self) -> None:
+        """Give the conversation the room while looking back or after the call."""
+        session = self.state.selected
+        call_over = self.state.call_end(session) is not None
+        self.live.set_looking_back(not self.live.conversation.following or call_over)
+
+    def _show_call_end(self) -> None:
+        """Say once that a call ended, and how it went; a new call closes that."""
+        if isinstance(self.screen, QuitDialog):
+            # One dialog at a time: this one shows if the user stays.
+            return
+        session = self.state.selected
+        call = (session.name, session.started_at)
+        if self.state.call_end(session) is None:
+            if isinstance(self.screen, CallEnded):
+                self.screen.dismiss()
+            return
+        if call == self._announced_call:
+            return
+        self._announced_call = call
+        self.push_screen(CallEnded(self.state, session, bot_gone=not session.finished))
+
+    def action_zoom(self, direction: int) -> None:
+        """Show more or less time in the voice timeline."""
+        window = self.live.voice.zoom(direction)
+        self.notify(f"Voice timeline: last {window:.0f} s", timeout=1.2)
+
+    def action_search(self) -> None:
+        """Search what was said in Live, or the logs from any other view."""
+        if self.view == "live" and self.state.has_bot:
+            self.live.open_search()
+            return
+        self.action_show_view("logs")
+        self.logs_view.open_search()
+
+    @on(Input.Submitted, "#live-search")
+    def _on_live_search(self, event: Input.Submitted) -> None:
+        conversation = self.live.conversation
+        self.live.close_search()
+        count = conversation.set_search(event.value)
+        if conversation.search_text and count:
+            conversation.jump(0)
+        elif conversation.search_text:
+            self.notify(f"Nothing mentions “{conversation.search_text}”", timeout=1.5)
+        self._show_following()
+
+    def action_end_search(self) -> None:
+        """``esc`` closes the search box, or else ends the search in view."""
+        if self.live.search.has_focus:
+            self.live.close_search()
+        elif self.view == "logs" and self.logs_view.pattern is not None:
+            self.logs_view.close_search()
+        elif self.view == "live" and self.live.conversation.search_text:
+            self.live.conversation.set_search(None)
+            self._show_following()
+
+    def action_level(self) -> None:
+        """Cycle the minimum log level."""
+        self.action_show_view("logs")
+        level = self.logs_view.cycle_level()
+        self.notify(f"Log level {level}", timeout=1.5)
+
+    def action_bus_filter(self) -> None:
+        """Cycle the bus feed filter."""
+        self.action_show_view("pipeline")
+        name = self.pipeline_view.bus.cycle_filter(self.state)
+        self.notify(f"Bus filter: {name}", timeout=1.5)
+
+    def action_latest_error(self) -> None:
+        """Show the latest error in the logs: n and p go on from there."""
+        self.action_show_view("logs")
+        if self.logs_view.select_latest_error() is None:
+            self.notify("No errors shown", timeout=1.5)
+        self._show_following()
+
+    def action_dismiss_error(self) -> None:
+        """Hide the error banner."""
+        self.state.dismiss_errors()
+        self.banner.update_from()
+
+    def action_next_worker(self) -> None:
+        """Scope the views to the next pipeline worker."""
+        name = self.state.select_next_worker()
+        if name is None:
+            self.notify("No pipeline workers yet", timeout=1.5)
+            return
+        self._bind_session()
+        self._dirty |= {STRIP, WORKERS, LATENCY, METRICS, STARTUP, CONVERSATION, FLOW, VOICE}
+        self.notify(f"Worker {name}", timeout=1.5)
+
+    def action_next_theme(self) -> None:
+        """Switch to the next theme."""
+        names = [n for n in palette.THEME_CYCLE if n in self.available_themes]
+        index = names.index(self.theme) + 1 if self.theme in names else 0
+        self.theme = names[index % len(names)]
+        self.notify(f"Theme {self.theme}", timeout=1.2)
+
+    def action_save_report(self) -> None:
+        """Save the session as a JSON and a Markdown report in the current directory."""
+        if not self.state.has_bot:
+            self.notify("Nothing to save yet", timeout=1.5)
+            return
+        from pipecat_tail.report import save_report
+
+        try:
+            json_path, md_path = save_report(self.state)
+        except OSError as e:
+            self.notify(str(e), title="Could not save the report", severity="error", timeout=4)
+            return
+        self.notify(f"{md_path}\n{json_path}", title="Saved the session report", timeout=4)
+
+    def action_help(self) -> None:
+        """Show the keys and colors."""
+        self.push_screen(HelpScreen())
+
+    async def action_connect(self) -> None:
+        """Ask the host to (re)connect."""
+        if self._action_connect:
+            await self._action_connect()
+
+    def on_key(self, event: events.Key) -> None:
+        """Close the log search on Escape."""
+        if event.key == "escape" and self.logs_view.search.has_focus:
+            self.logs_view.close_search()
+            event.stop()
+
+
+__all__ = ["TailApp"]
